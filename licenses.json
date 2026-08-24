@@ -6,5 +6,5 @@
     { "id": "v23gf", "hash": "dc799a9ccab7069bad08b9d4d4a66c7d156bf38afacf485cdfdd03d6666132ca", "owner": "v34hgh", "createdAt": "2026-08-25" },
     { "id": "3f3ff33f", "hash": "2628e1a404bcd80d07c6f0a071c633024bdc35cfe95e1f235cc81a1fdc7aa51f", "owner": "123123123awef", "createdAt": "2026-08-25" }
   ],
-  "revoked": ["kcwjeditestkey0167", "test1"]
+  "revoked": ["kcwjeditestkey0167", "test1", "3f3ff33f"]
 }
