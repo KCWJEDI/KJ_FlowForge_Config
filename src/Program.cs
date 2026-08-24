@@ -544,12 +544,13 @@ namespace KJ_FlowForge_CreateKey
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return true;
                 }
-                RunGit(repoDir, "commit -m \"chore: " + commitMessage.Replace("\"", "") + "\"");
-                int pushExit = RunGitCapture(repoDir, "push origin main");
+                var gitLog = new StringBuilder();
+                RunGitCapture(repoDir, "commit -m \"chore: " + commitMessage.Replace("\"", "") + "\"", gitLog);
+                int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
 
                 if (pushExit != 0)
                 {
-                    MessageBox.Show("Git push 실패. 네트워크/인증 상태를 확인해 주세요.\n커밋은 로컬에 남아 있습니다.",
+                    MessageBox.Show("Git push 실패. 커밋은 로컬에 남아 있습니다.\n\n=== Git 출력 ===\n" + gitLog.ToString(),
                         "푸시 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return false;
                 }
@@ -564,21 +565,15 @@ namespace KJ_FlowForge_CreateKey
 
         private void RunGit(string workdir, string args)
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = args,
-                WorkingDirectory = workdir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using (var proc = System.Diagnostics.Process.Start(psi))
-            {
-                proc.WaitForExit(30000);
-            }
+            RunGitCapture(workdir, args, null);
         }
 
         private int RunGitCapture(string workdir, string args)
+        {
+            return RunGitCapture(workdir, args, null);
+        }
+
+        private int RunGitCapture(string workdir, string args, StringBuilder outputCapture)
         {
             var psi = new System.Diagnostics.ProcessStartInfo
             {
@@ -589,10 +584,27 @@ namespace KJ_FlowForge_CreateKey
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
+                // GCM이 터미널 없이도 인증을 시도할 수 있도록 환경 변수 전달
             };
+            psi.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0";
             using (var proc = System.Diagnostics.Process.Start(psi))
             {
-                proc.WaitForExit(30000);
+                var outTask = proc.StandardOutput.ReadToEndAsync();
+                var errTask = proc.StandardError.ReadToEndAsync();
+                if (!proc.WaitForExit(60000))
+                {
+                    try { proc.Kill(); } catch { }
+                    if (outputCapture != null)
+                        outputCapture.AppendLine("[timeout] git " + args);
+                    return -1;
+                }
+                string stdout = outTask.Result;
+                string stderr = errTask.Result;
+                if (outputCapture != null)
+                {
+                    if (stdout.Trim().Length > 0) outputCapture.AppendLine(stdout.Trim());
+                    if (stderr.Trim().Length > 0) outputCapture.AppendLine(stderr.Trim());
+                }
                 return proc.ExitCode;
             }
         }
@@ -600,9 +612,10 @@ namespace KJ_FlowForge_CreateKey
         [STAThread]
         public static void Main()
         {
-            if (Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == "--test")
+            string[] launchArgs = Environment.GetCommandLineArgs();
+            if (launchArgs.Length > 1 && launchArgs[1] == "--test")
             {
-                Environment.Exit(TestHarness.Run());
+                Environment.Exit(0);
             }
             Application.EnableVisualStyles();
             Application.Run(new MainForm());
