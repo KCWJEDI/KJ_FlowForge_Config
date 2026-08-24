@@ -2,7 +2,8 @@
   "version": 1,
   "keys": [
     { "id": "test1", "hash": "07842a803a752bfa1e21ef7df461543c3a653195d18a018efcf85dc2780d6cde", "owner": "KJ1", "createdAt": "2026-08-25" },
-    { "id": "efef", "hash": "8ab09436326c270e8e9ff3e34c9a423869343594eef36893b7bd63f6f16e6ff2", "owner": "test11", "createdAt": "2026-08-25" }
+    { "id": "efef", "hash": "8ab09436326c270e8e9ff3e34c9a423869343594eef36893b7bd63f6f16e6ff2", "owner": "test11", "createdAt": "2026-08-25" },
+    { "id": "v23gf", "hash": "dc799a9ccab7069bad08b9d4d4a66c7d156bf38afacf485cdfdd03d6666132ca", "owner": "v34hgh", "createdAt": "2026-08-25" }
   ],
   "revoked": ["kcwjeditestkey0167"]
 }
