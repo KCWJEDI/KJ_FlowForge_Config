@@ -690,7 +690,9 @@ namespace KJ_FlowForge_CreateKey
             idBox.ReadOnly = true;               // 갱신 중에는 ID 변경 불가
             ownerBox.Text = entry.Owner;
             cancelRenewButton.Enabled = true;
+            cancelRenewButton.Visible = true;
             resultBox.Text = "";
+            resultBox.Visible = false;   // 갱신 모드 진입 시에는 결과창 숨김 유지
             generateButton.Text = "갱신 & 저장소 반영";
         }
 
@@ -700,7 +702,9 @@ namespace KJ_FlowForge_CreateKey
             idBox.ReadOnly = false;
             generateButton.Text = "키 생성 & 저장소 반영";
             cancelRenewButton.Enabled = false;
+            cancelRenewButton.Visible = false;
             resultBox.Text = "";
+            resultBox.Visible = false;
         }
 
         // ==================== 상세 복사 ====================
@@ -935,7 +939,7 @@ namespace KJ_FlowForge_CreateKey
                 Text = "갱신 취소",
                 Location = new Point(S(310), S(207)),
                 Size = new Size(S(100), S(32)),
-                Enabled = false,
+                Visible = false,
             };
             cancelRenewButton.Click += (s, e) => CancelRenew();
 
@@ -948,6 +952,7 @@ namespace KJ_FlowForge_CreateKey
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
                 Font = new Font("Consolas", 17f),
+                Visible = false,
             };
 
         }
@@ -1039,6 +1044,7 @@ namespace KJ_FlowForge_CreateKey
                            + Environment.NewLine + Environment.NewLine
                            + "Git 커밋 & 푸시 중...";
             copyKeyButton.Enabled = true;
+            resultBox.Visible = true;
 
             string commitMsg = (isRenew ? "renew license '" : "issue license '")
                              + id + "' for '" + owner + "' until " + expiry;
@@ -1050,6 +1056,7 @@ namespace KJ_FlowForge_CreateKey
                 idBox.ReadOnly = false;
                 generateButton.Text = "키 생성 & 저장소 반영";
                 cancelRenewButton.Enabled = false;
+                cancelRenewButton.Visible = false;
             }
 
             resultBox.Text = resultBox.Text.Replace(
