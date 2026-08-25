@@ -34,8 +34,12 @@ namespace KJ_FlowForge_CreateKey
         private Button copyKeyButton2;
 
         // 키 발급 탭
-        private TextBox idBox, ownerBox, expiryBox, resultBox;
-        private Button generateButton, copyKeyButton, copyJsonButton;
+        private TextBox idBox, ownerBox, resultBox;
+        private DateTimePicker expiryPicker;
+        private Label typedDateLabel;
+        private ComboBox expiryHourBox, expiryMinuteBox;
+        private CheckBox expiryTimeCheck;
+        private Button generateButton, copyKeyButton;
         private string lastKey = "";
         private LicenseEntry lastEntry = null;
 
@@ -377,31 +381,165 @@ namespace KJ_FlowForge_CreateKey
             var label2 = new Label { Text = "사용자 이름", Location = new Point(20, 75), AutoSize = true };
             ownerBox = new TextBox { Location = new Point(20, 98), Width = 500 };
 
-            var label3 = new Label { Text = "만료일 (YYYY-MM-DD, 비우면 무기한)", Location = new Point(20, 130), AutoSize = true };
-            expiryBox = new TextBox { Location = new Point(20, 153), Width = 500 };
+            var label3 = new Label { Text = "만료일 (체크 해제 시 무기한)", Location = new Point(20, 130), AutoSize = true };
+            expiryPicker = new DateTimePicker
+            {
+                Location = new Point(20, 153),
+                Width = 150,
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "yyyy-MM-dd",
+                MinDate = DateTime.Today,
+                Value = DateTime.Today.AddDays(30),
+            };
+            // 숫자 타이핑을 가로채 8자리(yyyyMMdd)가 모이면 한 번에 적용.
+            // 기본 자리별 입력은 중간값이 MinDate(오늘)보다 작으면 리셋되므로 이 방식 사용.
+            expiryPicker.KeyDown += (s, e) =>
+            {
+                if (e.Control && e.KeyCode == Keys.V)
+                {
+                    ApplyTypedDate(Clipboard.GetText());
+                    UpdateTypedDateLabel();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+                if (e.KeyCode >= Keys.D0 && e.KeyCode <= Keys.D9 && !e.Control && !e.Alt)
+                {
+                    typedDigits += (char)('0' + (e.KeyCode - Keys.D0));
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    UpdateTypedDateLabel();
+                    if (typedDigits.Length == 8) { ApplyTypedDate(typedDigits); typedDigits = ""; UpdateTypedDateLabel(); }
+                    return;
+                }
+                if (e.KeyCode >= Keys.NumPad0 && e.KeyCode <= Keys.NumPad9 && !e.Control && !e.Alt)
+                {
+                    typedDigits += (char)('0' + (e.KeyCode - Keys.NumPad0));
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    UpdateTypedDateLabel();
+                    if (typedDigits.Length == 8) { ApplyTypedDate(typedDigits); typedDigits = ""; UpdateTypedDateLabel(); }
+                    return;
+                }
+                if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Escape)
+                {
+                    typedDigits = "";
+                    UpdateTypedDateLabel();
+                    e.Handled = true;
+                    if (e.KeyCode == Keys.Escape) e.SuppressKeyPress = true;
+                }
+            };
+            expiryPicker.LostFocus += (s, e) => { typedDigits = ""; UpdateTypedDateLabel(); };
+            BuildIssueTabControls();
+            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryPicker,
+                typedDateLabel,
+                expiryTimeCheck, expiryHourBox, expiryMinuteBox,
+                generateButton, copyKeyButton, resultBox });
+            return page;
+        }
+
+        private string typedDigits = "";
+
+        private void UpdateTypedDateLabel()
+        {
+            string d = typedDigits ?? "";
+            if (d.Length == 0)
+            {
+                typedDateLabel.Text = "";
+                return;
+            }
+            string year = d.Substring(0, Math.Min(4, d.Length));
+            string month = d.Length > 4 ? d.Substring(4, Math.Min(2, d.Length - 4)) : "__";
+            string day = d.Length > 6 ? d.Substring(6, Math.Min(2, d.Length - 6)) : "__";
+            if (month.Length == 0) month = "_";
+            if (day.Length == 0) day = "_";
+            typedDateLabel.Text = "입력 중: " + year + "-" + month + "-" + day;
+        }
+
+        private void ApplyTypedDate(string rawInput)
+        {
+            if (rawInput == null) return;
+            string digits = "";
+            foreach (char c in rawInput) { if (c >= '0' && c <= '9') digits += c; }
+            if (digits.Length != 8) return;
+            DateTime parsed;
+            if (DateTime.TryParseExact(digits, "yyyyMMdd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out parsed))
+            {
+                if (parsed < DateTime.Today)
+                {
+                    MessageBox.Show("과거 날짜는 선택할 수 없습니다.", "만료일 오류",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    expiryPicker.Value = parsed;
+                }
+            }
+            else
+            {
+                MessageBox.Show("유효한 날짜가 아닙니다: " + digits, "만료일 오류",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void BuildIssueTabControls()
+        {
+            typedDateLabel = new Label
+            {
+                Text = "",
+                Location = new Point(20, 182),
+                AutoSize = true,
+                ForeColor = SystemColors.HotTrack,
+                Font = new Font("Consolas", 9, FontStyle.Bold),
+            };
+            expiryTimeCheck = new CheckBox
+            {
+                Text = "시간 지정",
+                Location = new Point(180, 155),
+                AutoSize = true,
+            };
+            expiryHourBox = new ComboBox
+            {
+                Location = new Point(265, 153),
+                Width = 60,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Enabled = false,
+            };
+            for (int h = 0; h < 24; h++) expiryHourBox.Items.Add(h.ToString("00"));
+            expiryMinuteBox = new ComboBox
+            {
+                Location = new Point(330, 153),
+                Width = 60,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Enabled = false,
+            };
+            for (int m = 0; m < 60; m += 5) expiryMinuteBox.Items.Add(m.ToString("00"));
+            expiryHourBox.SelectedIndex = 23;
+            expiryMinuteBox.SelectedIndex = 11; // 23:55
+            expiryTimeCheck.CheckedChanged += (s, e) =>
+            {
+                expiryHourBox.Enabled = expiryTimeCheck.Checked;
+                expiryMinuteBox.Enabled = expiryTimeCheck.Checked;
+            };
 
             generateButton = new Button
             {
                 Text = "키 생성 & 저장소 반영",
-                Location = new Point(20, 190),
+                Location = new Point(20, 205),
                 Width = 180,
                 Height = 36,
             };
             generateButton.Font = new Font(generateButton.Font, FontStyle.Bold);
             generateButton.Click += OnGenerate;
 
-            copyKeyButton = new Button { Text = "키 복사", Location = new Point(210, 192), Width = 90, Height = 32, Enabled = false };
+            copyKeyButton = new Button { Text = "키 복사", Location = new Point(210, 207), Width = 90, Height = 32, Enabled = false };
             copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) Clipboard.SetText(lastKey); };
-
-            copyJsonButton = new Button { Text = "JSON 항목 복사", Location = new Point(310, 192), Width = 120, Height = 32, Enabled = false };
-            copyJsonButton.Click += (s, e) =>
-            {
-                if (lastEntry != null) Clipboard.SetText(BuildEntryJson(lastEntry));
-            };
 
             resultBox = new TextBox
             {
-                Location = new Point(20, 240),
+                Location = new Point(20, 255),
                 Width = 500,
                 Height = 220,
                 Multiline = true,
@@ -410,16 +548,26 @@ namespace KJ_FlowForge_CreateKey
                 Font = new Font("Consolas", 9),
             };
 
-            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryBox,
-                generateButton, copyKeyButton, copyJsonButton, resultBox });
-            return page;
         }
 
         private async void OnGenerate(object sender, EventArgs e)
         {
             string id = idBox.Text.Trim();
             string owner = ownerBox.Text.Trim();
-            string expiry = expiryBox.Text.Trim();
+            DateTime expiryDate = expiryPicker.Value.Date;
+            if (expiryTimeCheck.Checked)
+            {
+                expiryDate = expiryDate.AddHours(expiryHourBox.SelectedIndex)
+                                     .AddMinutes(expiryMinuteBox.SelectedIndex);
+            }
+            else
+            {
+                // 시간 미지정 시 해당 날짜의 끝(23:59)까지 유효하도록 처리
+                expiryDate = expiryDate.AddDays(1).AddSeconds(-1);
+            }
+            string expiry = expiryDate.ToString("yyyy-MM-dd");
+            if (expiryTimeCheck.Checked)
+                expiry += " " + expiryDate.ToString("HH:mm");
 
             if (id.Length == 0 || owner.Length == 0)
             {
@@ -427,10 +575,10 @@ namespace KJ_FlowForge_CreateKey
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            DateTime parsedExpiry;
-            if (expiry.Length > 0 && !DateTime.TryParse(expiry, out parsedExpiry))
+            if (expiryDate < DateTime.Now)
             {
-                MessageBox.Show("만료일 형식을 YYYY-MM-DD 로 입력해 주세요.", "형식 오류",
+                MessageBox.Show("만료일이 현재 시각보다 이전입니다. 오늘 이후 날짜를 선택해 주세요.",
+                    "만료일 오류",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -473,14 +621,10 @@ namespace KJ_FlowForge_CreateKey
 
             resultBox.Text = "=== 팀원에게 전달할 키 ===" + Environment.NewLine + lastKey
                            + Environment.NewLine + Environment.NewLine
-                           + "=== licenses.json 항목 ===" + Environment.NewLine
-                           + BuildEntryJson(lastEntry) + Environment.NewLine + Environment.NewLine
                            + "Git 커밋 & 푸시 중...";
             copyKeyButton.Enabled = true;
-            copyJsonButton.Enabled = true;
 
-            string commitMsg = "issue license '" + id + "' for '" + owner + "'" +
-                               (expiry.Length > 0 ? " until " + expiry : "");
+            string commitMsg = "issue license '" + id + "' for '" + owner + "' until " + expiry;
             bool ok = await SaveAndPush(commitMsg);
 
             resultBox.Text = resultBox.Text.Replace(
@@ -504,21 +648,6 @@ namespace KJ_FlowForge_CreateKey
                 ExpiresAt = Str(obj, "expiresAt"),
                 CreatedAt = Str(obj, "createdAt"),
             };
-        }
-
-        private string BuildEntryJson(LicenseEntry en)
-        {
-            var parts = new List<string>
-            {
-                "  \"id\": \"" + Escape(en.Id) + "\"",
-                "  \"hash\": \"" + Escape(en.Hash) + "\"",
-                "  \"owner\": \"" + Escape(en.Owner) + "\"",
-            };
-            if (en.ExpiresAt.Length > 0)
-                parts.Add("  \"expiresAt\": \"" + Escape(en.ExpiresAt) + "\"");
-            if (en.CreatedAt.Length > 0)
-                parts.Add("  \"createdAt\": \"" + Escape(en.CreatedAt) + "\"");
-            return "{" + Environment.NewLine + string.Join("," + Environment.NewLine, parts) + Environment.NewLine + "}";
         }
 
         private string SerializeManifest(List<LicenseEntry> allEntries, List<string> revokedIds)
