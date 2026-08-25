@@ -26,6 +26,10 @@ namespace KJ_FlowForge_CreateKey
         private static readonly string LocalKeysPath = Path.Combine(ExeDir, "keys.local.json");
         public static string TestJsonPath { get { return JsonPath; } }
 
+        // 전체 UI 배율 (폰트/좌표 공통 적용)
+        private const float UiScale = 1.8f;
+        private static int S(int v) { return (int)Math.Round(v * UiScale); }
+
         private TabControl tabs;
 
         // 발급 현황 탭
@@ -49,8 +53,9 @@ namespace KJ_FlowForge_CreateKey
         public MainForm()
         {
             Text = "KJ FlowForge - 라이선스 관리";
-            Size = new Size(760, 560);
-            MinimumSize = new Size(700, 520);
+            Font = new Font("맑은 고딕", 15f);
+            Size = new Size(1380, 1010);
+            MinimumSize = new Size(1200, 900);
             StartPosition = FormStartPosition.CenterScreen;
 
             tabs = new TabControl { Dock = DockStyle.Fill };
@@ -71,19 +76,19 @@ namespace KJ_FlowForge_CreateKey
 
             var topPanel = new FlowLayoutPanel
             {
-                Location = new Point(12, 12),
-                Size = new Size(720, 42),
+                Location = new Point(S(12), S(12)),
+                Size = new Size(S(720), S(42)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
-            refreshButton = new Button { Text = "새로고침", Width = 90, Height = 32 };
+            refreshButton = new Button { Text = "새로고침", Width = S(90), Height = S(32) };
             refreshButton.Click += (s, e) => Reload();
-            deleteButton = new Button { Text = "삭제", Width = 70, Height = 32, Enabled = false };
+            deleteButton = new Button { Text = "삭제", Width = S(70), Height = S(32), Enabled = false };
             deleteButton.Click += (s, e) => DeleteSelected();
-            revokeButton = new Button { Text = "폐기", Width = 70, Height = 32, Enabled = false };
+            revokeButton = new Button { Text = "폐기", Width = S(70), Height = S(32), Enabled = false };
             revokeButton.Click += (s, e) => ToggleRevoke(true);
-            restoreButton = new Button { Text = "복원", Width = 70, Height = 32, Enabled = false };
+            restoreButton = new Button { Text = "복원", Width = S(70), Height = S(32), Enabled = false };
             restoreButton.Click += (s, e) => ToggleRevoke(false);
-            copyKeyButton2 = new Button { Text = "키 복사", Width = 80, Height = 32, Enabled = false };
+            copyKeyButton2 = new Button { Text = "키 복사", Width = S(80), Height = S(32), Enabled = false };
             copyKeyButton2.Click += (s, e) => CopySelectedKeys();
             topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton, copyKeyButton2 });
 
@@ -93,24 +98,24 @@ namespace KJ_FlowForge_CreateKey
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(12, 60),
-                Size = new Size(720, 420),
+                Location = new Point(S(12), S(60)),
+                Size = new Size(S(720), S(420)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
-                Font = new Font("Consolas", 9),
+                Font = new Font("Consolas", 17f),
             };
-            licenseList.Columns.Add("키 ID", 170);
-            licenseList.Columns.Add("사용자", 140);
-            licenseList.Columns.Add("만료일", 100);
-            licenseList.Columns.Add("상태", 80);
-            licenseList.Columns.Add("생성일", 100);
-            licenseList.Columns.Add("발급 키", 260);
+            licenseList.Columns.Add("키 ID", 300);
+            licenseList.Columns.Add("사용자", 250);
+            licenseList.Columns.Add("만료일", 180);
+            licenseList.Columns.Add("상태", 140);
+            licenseList.Columns.Add("생성일", 180);
+            licenseList.Columns.Add("발급 키", 430);
             licenseList.SelectedIndexChanged += OnListSelectionChanged;
             licenseList.DoubleClick += (s, e) => CopySelectedKeys();
 
             var hintLabel = new Label
             {
                 Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
-                Location = new Point(12, 490),
+                Location = new Point(S(12), S(490)),
                 AutoSize = true,
                 ForeColor = Color.Gray,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
@@ -375,17 +380,17 @@ namespace KJ_FlowForge_CreateKey
         {
             var page = new TabPage("키 발급");
 
-            var label1 = new Label { Text = "키 ID (구분용, 영문 권장)", Location = new Point(20, 20), AutoSize = true };
-            idBox = new TextBox { Location = new Point(20, 43), Width = 500 };
+            var label1 = new Label { Text = "키 ID (구분용, 영문 권장)", Location = new Point(S(20), S(20)), AutoSize = true };
+            idBox = new TextBox { Location = new Point(S(20), S(43)), Width = S(500) };
 
-            var label2 = new Label { Text = "사용자 이름", Location = new Point(20, 75), AutoSize = true };
-            ownerBox = new TextBox { Location = new Point(20, 98), Width = 500 };
+            var label2 = new Label { Text = "사용자 이름", Location = new Point(S(20), S(75)), AutoSize = true };
+            ownerBox = new TextBox { Location = new Point(S(20), S(98)), Width = S(500) };
 
-            var label3 = new Label { Text = "만료일 (체크 해제 시 무기한)", Location = new Point(20, 130), AutoSize = true };
+            var label3 = new Label { Text = "만료일 (체크 해제 시 무기한)", Location = new Point(S(20), S(130)), AutoSize = true };
             expiryPicker = new DateTimePicker
             {
-                Location = new Point(20, 153),
-                Width = 150,
+                Location = new Point(S(20), S(153)),
+                Width = S(150),
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "yyyy-MM-dd",
                 MinDate = DateTime.Today,
@@ -489,29 +494,29 @@ namespace KJ_FlowForge_CreateKey
             typedDateLabel = new Label
             {
                 Text = "",
-                Location = new Point(20, 182),
+                Location = new Point(S(20), S(182)),
                 AutoSize = true,
                 ForeColor = SystemColors.HotTrack,
-                Font = new Font("Consolas", 9, FontStyle.Bold),
+                Font = new Font("Consolas", 17f, FontStyle.Bold),
             };
             expiryTimeCheck = new CheckBox
             {
                 Text = "시간 지정",
-                Location = new Point(180, 155),
+                Location = new Point(S(180), S(155)),
                 AutoSize = true,
             };
             expiryHourBox = new ComboBox
             {
-                Location = new Point(265, 153),
-                Width = 60,
+                Location = new Point(S(265), S(153)),
+                Width = S(60),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Enabled = false,
             };
             for (int h = 0; h < 24; h++) expiryHourBox.Items.Add(h.ToString("00"));
             expiryMinuteBox = new ComboBox
             {
-                Location = new Point(330, 153),
-                Width = 60,
+                Location = new Point(S(330), S(153)),
+                Width = S(60),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Enabled = false,
             };
@@ -527,14 +532,14 @@ namespace KJ_FlowForge_CreateKey
             generateButton = new Button
             {
                 Text = "키 생성 & 저장소 반영",
-                Location = new Point(20, 205),
-                Width = 180,
-                Height = 36,
+                Location = new Point(S(20), S(205)),
+                Width = S(180),
+                Height = S(36),
             };
             generateButton.Font = new Font(generateButton.Font, FontStyle.Bold);
             generateButton.Click += OnGenerate;
 
-            copyKeyButton = new Button { Text = "키 복사", Location = new Point(210, 207), Width = 90, Height = 32, Enabled = false };
+            copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(207)), Width = S(90), Height = S(32), Enabled = false };
             copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) Clipboard.SetText(lastKey); };
 
             resultBox = new TextBox
@@ -545,7 +550,7 @@ namespace KJ_FlowForge_CreateKey
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
-                Font = new Font("Consolas", 9),
+                Font = new Font("Consolas", 17f),
             };
 
         }
