@@ -1,8 +1,7 @@
 ﻿{
   "version": 1,
   "keys": [
-    { "id": "admin", "hash": "e63b7049f4ec015ccd9065d0c1f7de13e957d7cff4dc312d65df487b92ea3970", "owner": "admin", "createdAt": "2026-08-26" },
-    { "id": "Test1", "hash": "9936d58caaa18cb6b576b9f8347d327476db6911e19344ee0b2b44cc5ccc72db", "owner": "Player1", "expiresAt": "2026-04-21", "createdAt": "2026-08-26" }
+    { "id": "admin", "hash": "e63b7049f4ec015ccd9065d0c1f7de13e957d7cff4dc312d65df487b92ea3970", "owner": "admin", "createdAt": "2026-08-26" }
   ],
   "revoked": ["kcwjeditestkey0167", "test1", "v23gf", "efef", "3f3ff33f"]
 }
