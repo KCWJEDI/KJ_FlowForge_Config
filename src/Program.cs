@@ -24,6 +24,8 @@ namespace KJ_FlowForge_CreateKey
         private static readonly string ExeDir = AppDomain.CurrentDomain.BaseDirectory;
         private static readonly string JsonPath = Path.Combine(ExeDir, "licenses.json");
         private static readonly string LocalKeysPath = Path.Combine(ExeDir, "keys.local.json");
+        private static readonly string SettingsPath = Path.Combine(ExeDir, "ui.settings.json");
+        private static readonly string BackupDirPath = @"W:\WorkSpace\KJ_FlowForge_Config_Backup";
         public static string TestJsonPath { get { return JsonPath; } }
 
         // 전체 UI 배율 (폰트/좌표 공통 적용)
@@ -36,6 +38,9 @@ namespace KJ_FlowForge_CreateKey
         private ListView licenseList;
         private Button refreshButton, deleteButton, revokeButton, restoreButton;
         private Button copyKeyButton2;
+        private TextBox searchBox;
+        private CheckBox filterExpiringCheck, filterRevokedCheck;
+        private Button renewButton, copyDetailButton;
 
         // 키 발급 탭
         private TextBox idBox, ownerBox, resultBox;
@@ -44,8 +49,10 @@ namespace KJ_FlowForge_CreateKey
         private ComboBox expiryHourBox, expiryMinuteBox;
         private CheckBox expiryTimeCheck;
         private Button generateButton, copyKeyButton;
+        private Button cancelRenewButton;
         private string lastKey = "";
         private LicenseEntry lastEntry = null;
+        private LicenseEntry renewTarget = null;
 
         private List<LicenseEntry> entries = new List<LicenseEntry>();
         private List<string> revoked = new List<string>();
@@ -165,6 +172,7 @@ namespace KJ_FlowForge_CreateKey
             }
             ResumeAllLayout(this);
             AdjustKeyColumnWidth();
+            SaveUiSettings();
         }
 
         private void SuspendAllLayout(Control root)
@@ -197,8 +205,21 @@ namespace KJ_FlowForge_CreateKey
             Size = new Size(1380, 1010);
             MinimumSize = new Size(1200, 900);
             StartPosition = FormStartPosition.CenterScreen;
+            TryLoadZoom();
+            if (Math.Abs(uiZoom - DesignScale) > 0.01f)
+            {
+                float rf = uiZoom / DesignScale;
+                Font = new Font("맑은 고딕", 15f * rf);
+                Size = new Size((int)Math.Round(1380 * rf), (int)Math.Round(1010 * rf));
+                MinimumSize = new Size((int)Math.Round(1200 * rf), (int)Math.Round(900 * rf));
+                baseClientSize = ClientSize;
+                baseMinimumSize = MinimumSize;
+            }
+            else
+            {
             baseClientSize = ClientSize;
             baseMinimumSize = MinimumSize;
+            }
 
             tabs = new TabControl { Dock = DockStyle.Fill };
             var issueTab = BuildIssueTab();
@@ -215,8 +236,47 @@ namespace KJ_FlowForge_CreateKey
             Application.AddMessageFilter(wheelFilter);
             FormClosed += (s, e) => Application.RemoveMessageFilter(wheelFilter);
             Shown += (s, e) => CaptureZoomBase();
+            FormClosing += (s, e) => SaveUiSettings();
             Resize += (s, e) => AdjustKeyColumnWidth();
             Load += (s, e) => Reload();
+            Shown += (s, e) => { BackupLocalKeys(); ShowExpiryAlert(); };
+        }
+
+        // ==================== 설정 저장/복원 (배율 기억) ====================
+
+        private void SaveUiSettings()
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("{");
+                sb.AppendLine("  \"zoom\": " + uiZoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                sb.AppendLine("}");
+                File.WriteAllText(SettingsPath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private void TryLoadZoom()
+        {
+            try
+            {
+                if (!File.Exists(SettingsPath)) return;
+                string raw = File.ReadAllText(SettingsPath);
+                int i = raw.IndexOf("\"zoom\"");
+                if (i < 0) return;
+                int colon = raw.IndexOf(':', i);
+                int end = colon;
+                while (end < raw.Length && (char.IsDigit(raw[end]) || raw[end] == '.' || raw[end] == '-')) end++;
+                float z;
+                if (float.TryParse(raw.Substring(colon + 1, end - colon - 1).Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out z))
+                {
+                    uiZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, z));
+                }
+            }
+            catch { }
         }
 
         // ==================== 발급 현황 탭 ====================
@@ -241,7 +301,27 @@ namespace KJ_FlowForge_CreateKey
             restoreButton.Click += (s, e) => ToggleRevoke(false);
             copyKeyButton2 = new Button { Text = "키 복사", Width = S(80), Height = S(32), Enabled = false };
             copyKeyButton2.Click += (s, e) => CopySelectedKeys();
-            topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton, copyKeyButton2 });
+            renewButton = new Button { Text = "갱신", Width = S(70), Height = S(32), Enabled = false };
+            renewButton.Click += (s, e) => StartRenewSelected();
+            copyDetailButton = new Button { Text = "상세 복사", Width = S(100), Height = S(32), Enabled = false };
+            copyDetailButton.Click += (s, e) => CopySelectedDetails();
+            topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton,
+                copyKeyButton2, renewButton, copyDetailButton });
+
+            // 검색 + 필터 행
+            var filterPanel = new FlowLayoutPanel
+            {
+                Location = new Point(S(12), S(60)),
+                Size = new Size(S(720), S(40)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            };
+            searchBox = new TextBox { Width = S(280) };
+            searchBox.TextChanged += (s, e) => RenderList();
+            filterExpiringCheck = new CheckBox { Text = "만료 임박(7일)만", AutoSize = true };
+            filterExpiringCheck.CheckedChanged += (s, e) => RenderList();
+            filterRevokedCheck = new CheckBox { Text = "폐기된 것만", AutoSize = true };
+            filterRevokedCheck.CheckedChanged += (s, e) => RenderList();
+            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck });
 
             licenseList = new ListView
             {
@@ -249,8 +329,8 @@ namespace KJ_FlowForge_CreateKey
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(S(12), S(60)),
-                Size = new Size(S(720), S(420)),
+                Location = new Point(S(12), S(106)),
+                Size = new Size(S(720), S(374)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Font = new Font("Consolas", 17f),
             };
@@ -266,13 +346,13 @@ namespace KJ_FlowForge_CreateKey
             var hintLabel = new Label
             {
                 Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
-                Location = new Point(S(12), S(490)),
+                Location = new Point(S(12), S(486)),
                 AutoSize = true,
                 ForeColor = Color.Gray,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             };
 
-            page.Controls.AddRange(new Control[] { topPanel, licenseList, hintLabel });
+            page.Controls.AddRange(new Control[] { topPanel, filterPanel, licenseList, hintLabel });
             return page;
         }
 
@@ -282,12 +362,16 @@ namespace KJ_FlowForge_CreateKey
             {
                 deleteButton.Enabled = revokeButton.Enabled = restoreButton.Enabled = false;
                 copyKeyButton2.Enabled = false;
+                renewButton.Enabled = false;
+                copyDetailButton.Enabled = false;
                 return;
             }
             var entry = GetSelected();
             bool isRevoked = entry != null && revoked.Contains(entry.Id);
             deleteButton.Enabled = true;
             copyKeyButton2.Enabled = true;
+            renewButton.Enabled = true;
+            copyDetailButton.Enabled = true;
             revokeButton.Enabled = !isRevoked;
             restoreButton.Enabled = isRevoked;
         }
@@ -421,15 +505,37 @@ namespace KJ_FlowForge_CreateKey
         {
             licenseList.Items.Clear();
             DateTime now = DateTime.Today;
+            string query = searchBox != null ? searchBox.Text.Trim().ToLowerInvariant() : "";
             foreach (var en in entries)
             {
                 string status;
                 Color color = Color.Black;
                 DateTime expDt;
-                if (revoked.Contains(en.Id)) { status = "폐기됨"; color = Color.DarkRed; }
+                bool isRevoked = revoked.Contains(en.Id);
+                int daysLeft = int.MinValue;
+                if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
+                    daysLeft = (int)(expDt - now).TotalDays;
+
+                // 검색 필터 (ID / 사용자 / 키)
+                if (query.Length > 0)
+                {
+                    bool hit = en.Id.ToLowerInvariant().Contains(query)
+                        || en.Owner.ToLowerInvariant().Contains(query)
+                        || en.KeyPlain.ToLowerInvariant().Contains(query);
+                    if (!hit) continue;
+                }
+                // 만료 임박 필터: 유효하고 D-7 이내인 키만
+                if (filterExpiringCheck != null && filterExpiringCheck.Checked)
+                {
+                    if (isRevoked || daysLeft == int.MinValue || daysLeft < 0 || daysLeft > 7) continue;
+                }
+                // 폐기 필터: 폐기된 키만
+                if (filterRevokedCheck != null && filterRevokedCheck.Checked && !isRevoked) continue;
+
+                if (isRevoked) { status = "폐기됨"; color = Color.DarkRed; }
                 else if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
                 {
-                    int daysLeft = (int)(expDt - now).TotalDays;
+                    daysLeft = (int)(expDt - now).TotalDays;
                     if (daysLeft < 0) { status = "만료"; color = Color.Red; }
                     else if (daysLeft <= 7) { status = "D-" + daysLeft; color = Color.Orange; }
                     else status = "유효";
@@ -544,6 +650,90 @@ namespace KJ_FlowForge_CreateKey
             SaveLocalKey(dummy);
         }
 
+        // ==================== 만료 알림 ====================
+
+        private void ShowExpiryAlert()
+        {
+            DateTime now = DateTime.Today;
+            var soon = new List<string>();
+            var expired = new List<string>();
+            foreach (var en in entries)
+            {
+                if (revoked.Contains(en.Id)) continue;
+                DateTime expDt;
+                if (en.ExpiresAt.Length == 0 || !DateTime.TryParse(en.ExpiresAt, out expDt)) continue;
+                int daysLeft = (int)(expDt - now).TotalDays;
+                if (daysLeft < 0)
+                    expired.Add(en.Id + " (" + en.Owner + ") - " + en.ExpiresAt);
+                else if (daysLeft <= 7)
+                    soon.Add(en.Id + " (" + en.Owner + ") - D-" + daysLeft + " (" + en.ExpiresAt + ")");
+            }
+            if (soon.Count == 0 && expired.Count == 0) return;
+            var sb = new StringBuilder();
+            if (expired.Count > 0)
+                sb.AppendLine("만료된 키 " + expired.Count + "개:").AppendLine(string.Join("\n", expired.ToArray())).AppendLine();
+            if (soon.Count > 0)
+                sb.AppendLine("만료 임박 키 " + soon.Count + "개:").Append(string.Join("\n", soon.ToArray()));
+            MessageBox.Show(sb.ToString(), "만료 알림",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        // ==================== 키 갱신(연장) ====================
+
+        private void StartRenewSelected()
+        {
+            var entry = GetSelected();
+            if (entry == null) return;
+            renewTarget = entry;
+            tabs.SelectedTab = tabs.TabPages[1]; // 키 발급 탭으로 전환
+            idBox.Text = entry.Id;
+            idBox.ReadOnly = true;               // 갱신 중에는 ID 변경 불가
+            ownerBox.Text = entry.Owner;
+            resultBox.Text = "[갱신 모드] '" + entry.Id + "' (" + entry.Owner + ")\n"
+                           + "새 만료일을 선택하고 [갱신 & 저장소 반영]을 누르세요.\n"
+                           + "취소하려면 아래 [갱신 취소]를 누르세요.";
+            generateButton.Text = "갱신 & 저장소 반영";
+        }
+
+        private void CancelRenew()
+        {
+            renewTarget = null;
+            idBox.ReadOnly = false;
+            generateButton.Text = "키 생성 & 저장소 반영";
+            resultBox.Text = "";
+        }
+
+        // ==================== 상세 복사 ====================
+
+        private void CopySelectedDetails()
+        {
+            var selected = GetSelectedList();
+            if (selected.Count == 0) return;
+            var lines = new List<string>();
+            foreach (var en in selected)
+            {
+                string line = "ID: " + en.Id + " / 사용자: " + en.Owner + " / 만료: "
+                            + (en.ExpiresAt.Length > 0 ? en.ExpiresAt : "무기한")
+                            + (en.KeyPlain.Length > 0 ? " / 키: " + en.KeyPlain : "");
+                lines.Add(line);
+            }
+            Clipboard.SetText(string.Join(Environment.NewLine, lines.ToArray()));
+        }
+
+        // ==================== 로컬 키 백업 ====================
+
+        private void BackupLocalKeys()
+        {
+            try
+            {
+                if (!File.Exists(LocalKeysPath)) return;
+                Directory.CreateDirectory(BackupDirPath);
+                string stamp = DateTime.Now.ToString("yyyy-MM-dd");
+                File.Copy(LocalKeysPath, Path.Combine(BackupDirPath, "keys.local." + stamp + ".json"), true);
+            }
+            catch { /* 백업 실패는 조용히 무시 */ }
+        }
+
         private async void ToggleRevoke(bool doRevoke)
         {
             var entry = GetSelected();
@@ -637,7 +827,7 @@ namespace KJ_FlowForge_CreateKey
             page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryPicker,
                 typedDateLabel,
                 expiryTimeCheck, expiryHourBox, expiryMinuteBox,
-                generateButton, copyKeyButton, resultBox });
+                generateButton, copyKeyButton, cancelRenewButton, resultBox });
             return page;
         }
 
@@ -740,6 +930,15 @@ namespace KJ_FlowForge_CreateKey
             copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(207)), Width = S(90), Height = S(32), Enabled = false };
             copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) Clipboard.SetText(lastKey); };
 
+            cancelRenewButton = new Button
+            {
+                Text = "갱신 취소",
+                Location = new Point(S(310), S(207)),
+                Size = new Size(S(100), S(32)),
+                Enabled = true,
+            };
+            cancelRenewButton.Click += (s, e) => CancelRenew();
+
             resultBox = new TextBox
             {
                 Location = new Point(20, 255),
@@ -787,9 +986,16 @@ namespace KJ_FlowForge_CreateKey
             }
             if (entries.Any(x => x.Id == id))
             {
+                if (renewTarget != null && renewTarget.Id == id)
+                {
+                    // 갱신 모드: 자기 자신 ID는 허용
+                }
+                else
+                {
                 MessageBox.Show("'" + id + "' 는 이미 존재하는 키 ID입니다. 다른 ID를 입력해 주세요.", "중복",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+                }
             }
 
             generateButton.Enabled = false;
@@ -806,10 +1012,11 @@ namespace KJ_FlowForge_CreateKey
             }
             lastKey = sb.ToString();
 
+            bool isRenew = renewTarget != null;
             using (var sha = SHA256.Create())
             {
                 byte[] hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(lastKey));
-                lastEntry = new LicenseEntry
+            lastEntry = new LicenseEntry
                 {
                     Id = id,
                     Hash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant(),
@@ -820,6 +1027,12 @@ namespace KJ_FlowForge_CreateKey
                 };
             }
             entries.Add(lastEntry);
+            if (isRenew)
+            {
+                // 이전 항목 제거 (같은 ID 교체)
+                var old = entries.FirstOrDefault(x => x.Id == id && x != lastEntry);
+                if (old != null) entries.Remove(old);
+            }
             SaveLocalKey(lastEntry);
 
             resultBox.Text = "=== 팀원에게 전달할 키 ===" + Environment.NewLine + lastKey
@@ -827,8 +1040,16 @@ namespace KJ_FlowForge_CreateKey
                            + "Git 커밋 & 푸시 중...";
             copyKeyButton.Enabled = true;
 
-            string commitMsg = "issue license '" + id + "' for '" + owner + "' until " + expiry;
+            string commitMsg = (isRenew ? "renew license '" : "issue license '")
+                             + id + "' for '" + owner + "' until " + expiry;
             bool ok = await SaveAndPush(commitMsg);
+
+            if (isRenew)
+            {
+                renewTarget = null;
+                idBox.ReadOnly = false;
+                generateButton.Text = "키 생성 & 저장소 반영";
+            }
 
             resultBox.Text = resultBox.Text.Replace(
                 "Git 커밋 & 푸시 중...",
