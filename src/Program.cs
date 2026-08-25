@@ -50,6 +50,7 @@ namespace KJ_FlowForge_CreateKey
         private CheckBox expiryTimeCheck;
         private Button generateButton, copyKeyButton;
         private Button cancelRenewButton;
+        private Label renewModeLabel;
         private string lastKey = "";
         private LicenseEntry lastEntry = null;
         private LicenseEntry renewTarget = null;
@@ -689,9 +690,8 @@ namespace KJ_FlowForge_CreateKey
             idBox.Text = entry.Id;
             idBox.ReadOnly = true;               // 갱신 중에는 ID 변경 불가
             ownerBox.Text = entry.Owner;
-            resultBox.Text = "[갱신 모드] '" + entry.Id + "' (" + entry.Owner + ")\n"
-                           + "새 만료일을 선택하고 [갱신 & 저장소 반영]을 누르세요.\n"
-                           + "취소하려면 아래 [갱신 취소]를 누르세요.";
+            renewModeLabel.Text = "갱신 모드: '" + entry.Id + "' (" + entry.Owner + ")";
+            resultBox.Text = "";
             generateButton.Text = "갱신 & 저장소 반영";
         }
 
@@ -700,6 +700,7 @@ namespace KJ_FlowForge_CreateKey
             renewTarget = null;
             idBox.ReadOnly = false;
             generateButton.Text = "키 생성 & 저장소 반영";
+            renewModeLabel.Text = "";
             resultBox.Text = "";
         }
 
@@ -827,7 +828,7 @@ namespace KJ_FlowForge_CreateKey
             page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryPicker,
                 typedDateLabel,
                 expiryTimeCheck, expiryHourBox, expiryMinuteBox,
-                generateButton, copyKeyButton, cancelRenewButton, resultBox });
+                generateButton, copyKeyButton, cancelRenewButton, renewModeLabel, resultBox });
             return page;
         }
 
@@ -939,6 +940,15 @@ namespace KJ_FlowForge_CreateKey
             };
             cancelRenewButton.Click += (s, e) => CancelRenew();
 
+            renewModeLabel = new Label
+            {
+                Text = "",
+                Location = new Point(S(420), S(210)),
+                AutoSize = true,
+                ForeColor = Color.Firebrick,
+                Font = new Font("맑은 고딕", 13f, FontStyle.Bold),
+            };
+
             resultBox = new TextBox
             {
                 Location = new Point(20, 255),
@@ -1049,6 +1059,7 @@ namespace KJ_FlowForge_CreateKey
                 renewTarget = null;
                 idBox.ReadOnly = false;
                 generateButton.Text = "키 생성 & 저장소 반영";
+                renewModeLabel.Text = "";
             }
 
             resultBox.Text = resultBox.Text.Replace(
