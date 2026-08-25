@@ -171,7 +171,7 @@ namespace KJ_FlowForge_CreateKey
                     lv.Columns[i].Width = (int)Math.Round(widths[i] * factor);
             }
             ResumeAllLayout(this);
-            AdjustKeyColumnWidth();
+            AutoFitAllColumns();
             SaveUiSettings();
         }
 
@@ -187,15 +187,36 @@ namespace KJ_FlowForge_CreateKey
             root.ResumeLayout(true);
         }
 
-        // 발급 현황 마지막 열("발급 키")을 남은 폭만큼 자동 확장
-        private void AdjustKeyColumnWidth()
+        // 발급 현황 모든 열을 내용 길이에 맞게 자동 확장
+        private void AutoFitAllColumns()
         {
             if (licenseList == null || licenseList.Columns.Count == 0) return;
-            int others = 0;
-            for (int i = 0; i < licenseList.Columns.Count - 1; i++)
-                others += licenseList.Columns[i].Width;
-            int remaining = licenseList.ClientSize.Width - others;
-            licenseList.Columns[licenseList.Columns.Count - 1].Width = Math.Max(S(120), remaining);
+            if (licenseList.Items.Count == 0)
+            {
+                for (int i = 0; i < licenseList.Columns.Count; i++)
+                    licenseList.Columns[i].Width = ColumnHeaderMinWidth(i);
+                return;
+            }
+            using (var g = licenseList.CreateGraphics())
+            {
+                for (int col = 0; col < licenseList.Columns.Count; col++)
+                {
+                    int maxW = (int)Math.Ceiling(g.MeasureString(licenseList.Columns[col].Text, licenseList.Font).Width) + 30;
+                    foreach (ListViewItem item in licenseList.Items)
+                    {
+                        string text = col < item.SubItems.Count ? item.SubItems[col].Text : "";
+                        int w = (int)Math.Ceiling(g.MeasureString(text, licenseList.Font).Width) + 40;
+                        if (w > maxW) maxW = w;
+                    }
+                    licenseList.Columns[col].Width = maxW;
+                }
+            }
+        }
+
+        private int ColumnHeaderMinWidth(int index)
+        {
+            int[] mins = { S(120), S(100), S(90), S(70), S(90), S(120) };
+            return index < mins.Length ? mins[index] : S(80);
         }
 
         public MainForm()
@@ -237,7 +258,7 @@ namespace KJ_FlowForge_CreateKey
             FormClosed += (s, e) => Application.RemoveMessageFilter(wheelFilter);
             Shown += (s, e) => CaptureZoomBase();
             FormClosing += (s, e) => SaveUiSettings();
-            Resize += (s, e) => AdjustKeyColumnWidth();
+            Resize += (s, e) => AutoFitAllColumns();
             Load += (s, e) => Reload();
             Shown += (s, e) => { BackupLocalKeys(); ShowExpiryAlert(); };
         }
@@ -560,23 +581,6 @@ namespace KJ_FlowForge_CreateKey
         {
             if (windowAutoFitted || licenseList.Items.Count == 0) return;
             windowAutoFitted = true;
-            int maxKeyWidth = 0;
-            using (var g = licenseList.CreateGraphics())
-            {
-                foreach (ListViewItem item in licenseList.Items)
-                {
-                    string keyText = item.SubItems[5].Text;
-                    if (keyText.Length == 0) continue;
-                    int w = (int)Math.Ceiling(g.MeasureString(keyText, licenseList.Font).Width) + 40;
-                    if (w > maxKeyWidth) maxKeyWidth = w;
-                }
-            }
-            if (maxKeyWidth <= 0) return;
-            AdjustKeyColumnWidth();
-            int lastCol = licenseList.Columns.Count - 1;
-            if (licenseList.Columns[lastCol].Width < maxKeyWidth)
-                licenseList.Columns[lastCol].Width = maxKeyWidth;
-
             // 열 폭 합계가 ListView 안에 다 들어가도록 창 폭 계산
             int totalColumns = 0;
             foreach (ColumnHeader col in licenseList.Columns) totalColumns += col.Width;
