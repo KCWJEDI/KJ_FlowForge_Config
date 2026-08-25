@@ -945,7 +945,7 @@ namespace KJ_FlowForge_CreateKey
 
             resultBox = new TextBox
             {
-                Location = new Point(20, 255),
+                Location = new Point(S(20), S(250)),
                 Width = 500,
                 Height = 220,
                 Multiline = true,
