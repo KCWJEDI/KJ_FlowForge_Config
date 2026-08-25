@@ -16,12 +16,14 @@ namespace KJ_FlowForge_CreateKey
         public string Owner = "";
         public string ExpiresAt = "";
         public string CreatedAt = "";
+        public string KeyPlain = "";   // 로컬 전용 (keys.local.json)
     }
 
     public class MainForm : Form
     {
         private static readonly string ExeDir = AppDomain.CurrentDomain.BaseDirectory;
         private static readonly string JsonPath = Path.Combine(ExeDir, "licenses.json");
+        private static readonly string LocalKeysPath = Path.Combine(ExeDir, "keys.local.json");
         public static string TestJsonPath { get { return JsonPath; } }
 
         private TabControl tabs;
@@ -29,6 +31,7 @@ namespace KJ_FlowForge_CreateKey
         // 발급 현황 탭
         private ListView licenseList;
         private Button refreshButton, deleteButton, revokeButton, restoreButton;
+        private Button copyKeyButton2;
 
         // 키 발급 탭
         private TextBox idBox, ownerBox, expiryBox, resultBox;
@@ -76,7 +79,9 @@ namespace KJ_FlowForge_CreateKey
             revokeButton.Click += (s, e) => ToggleRevoke(true);
             restoreButton = new Button { Text = "복원", Width = 70, Height = 32, Enabled = false };
             restoreButton.Click += (s, e) => ToggleRevoke(false);
-            topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton });
+            copyKeyButton2 = new Button { Text = "키 복사", Width = 80, Height = 32, Enabled = false };
+            copyKeyButton2.Click += (s, e) => CopySelectedKeys();
+            topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton, copyKeyButton2 });
 
             licenseList = new ListView
             {
@@ -94,11 +99,13 @@ namespace KJ_FlowForge_CreateKey
             licenseList.Columns.Add("만료일", 100);
             licenseList.Columns.Add("상태", 80);
             licenseList.Columns.Add("생성일", 100);
+            licenseList.Columns.Add("발급 키", 260);
             licenseList.SelectedIndexChanged += OnListSelectionChanged;
+            licenseList.DoubleClick += (s, e) => CopySelectedKeys();
 
             var hintLabel = new Label
             {
-                Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.",
+                Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
                 Location = new Point(12, 490),
                 AutoSize = true,
                 ForeColor = Color.Gray,
@@ -114,11 +121,13 @@ namespace KJ_FlowForge_CreateKey
             if (licenseList.SelectedItems.Count == 0)
             {
                 deleteButton.Enabled = revokeButton.Enabled = restoreButton.Enabled = false;
+                copyKeyButton2.Enabled = false;
                 return;
             }
             var entry = GetSelected();
             bool isRevoked = entry != null && revoked.Contains(entry.Id);
             deleteButton.Enabled = true;
+            copyKeyButton2.Enabled = true;
             revokeButton.Enabled = !isRevoked;
             restoreButton.Enabled = isRevoked;
         }
@@ -128,6 +137,18 @@ namespace KJ_FlowForge_CreateKey
             if (licenseList.SelectedItems.Count == 0) return null;
             string id = licenseList.SelectedItems[0].SubItems[0].Text;
             return entries.FirstOrDefault(x => x.Id == id);
+        }
+
+        private List<LicenseEntry> GetSelectedList()
+        {
+            var result = new List<LicenseEntry>();
+            foreach (ListViewItem item in licenseList.SelectedItems)
+            {
+                string id = item.SubItems[0].Text;
+                var entry = entries.FirstOrDefault(x => x.Id == id);
+                if (entry != null) result.Add(entry);
+            }
+            return result;
         }
 
         private void Reload()
@@ -165,7 +186,75 @@ namespace KJ_FlowForge_CreateKey
                 }
             }
             catch { /* 파일 없음 또는 파싱 실패 */ }
+            LoadLocalKeys();
             RenderList();
+        }
+
+        private void LoadLocalKeys()
+        {
+            try
+            {
+                if (!File.Exists(LocalKeysPath)) return;
+                string raw = File.ReadAllText(LocalKeysPath);
+                int pos = 0;
+                SkipWs(raw, ref pos);
+                var node = ParseObject(raw, ref pos);
+                if (node.ContainsKey("keys") && node["keys"] is List<object>)
+                {
+                    foreach (var item in (List<object>)node["keys"])
+                    {
+                        var obj = (Dictionary<string, object>)item;
+                        string id = Str(obj, "id");
+                        string key = Str(obj, "key");
+                        var entry = entries.FirstOrDefault(x => x.Id == id);
+                        if (entry != null) entry.KeyPlain = key;
+                    }
+                }
+            }
+            catch { /* 로컬 파일 없음/손상 무시 */ }
+        }
+
+        private void SaveLocalKey(LicenseEntry en)
+        {
+            try
+            {
+                var all = new List<Dictionary<string, object>>();
+                if (File.Exists(LocalKeysPath))
+                {
+                    string raw = File.ReadAllText(LocalKeysPath);
+                    int pos = 0;
+                    SkipWs(raw, ref pos);
+                    var node = ParseObject(raw, ref pos);
+                    if (node.ContainsKey("keys") && node["keys"] is List<object>)
+                    {
+                        foreach (var item in (List<object>)node["keys"])
+                            all.Add((Dictionary<string, object>)item);
+                    }
+                }
+                all.RemoveAll(x => Str(x, "id") == en.Id);
+                var record = new Dictionary<string, object>
+                {
+                    { "id", en.Id },
+                    { "key", en.KeyPlain },
+                    { "createdAt", en.CreatedAt },
+                };
+                all.Add(record);
+
+                var sb = new StringBuilder();
+                sb.AppendLine("{");
+                sb.AppendLine("  \"keys\": [");
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var rec = all[i];
+                    sb.Append("    { \"id\": \"" + Escape(Str(rec, "id")) + "\", \"key\": \"" + Escape(Str(rec, "key"))
+                        + "\", \"createdAt\": \"" + Escape(Str(rec, "createdAt")) + "\" }");
+                    sb.AppendLine(i < all.Count - 1 ? "," : "");
+                }
+                sb.AppendLine("  ]");
+                sb.Append("}");
+                File.WriteAllText(LocalKeysPath, sb.ToString() + "\n", Encoding.UTF8);
+            }
+            catch { /* 저장 실패 무시 */ }
         }
 
         private void RenderList()
@@ -192,28 +281,76 @@ namespace KJ_FlowForge_CreateKey
                 item.SubItems.Add(en.ExpiresAt.Length > 0 ? en.ExpiresAt : "-");
                 item.SubItems.Add(status);
                 item.SubItems.Add(en.CreatedAt.Length > 0 ? en.CreatedAt : "-");
+                item.SubItems.Add(en.KeyPlain.Length > 0 ? en.KeyPlain : "(로컬 기록 없음)");
                 item.ForeColor = color;
                 licenseList.Items.Add(item);
             }
         }
 
+        private void CopySelectedKeys()
+        {
+            var selected = GetSelectedList();
+            if (selected.Count == 0) return;
+            var lines = new List<string>();
+            foreach (var en in selected)
+            {
+                if (en.KeyPlain.Length > 0)
+                    lines.Add(en.KeyPlain);
+            }
+            if (lines.Count == 0)
+            {
+                MessageBox.Show("선택한 항목에 로컬 키 기록이 없습니다.\n(프로그램에서 발급된 키만 표시됩니다)",
+                    "복사 불가", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Clipboard.SetText(string.Join(Environment.NewLine, lines.ToArray()));
+        }
+
         private async void DeleteSelected()
         {
-            var entry = GetSelected();
-            if (entry == null) return;
+            var selected = GetSelectedList();
+            if (selected.Count == 0) return;
+            string summary;
+            if (selected.Count == 1)
+                summary = "키 '" + selected[0].Id + "' (" + selected[0].Owner + ")";
+            else
+                summary = "키 " + selected.Count + "개 (" + string.Join(", ", selected.ConvertAll(x => x.Id).ToArray()) + ")";
             var confirm = MessageBox.Show(
-                "키 '" + entry.Id + "' (" + entry.Owner + ") 을/를 완전히 삭제할까요?\n이 작업은 커밋 & 푸시됩니다.",
+                summary + " 을/를 완전히 삭제할까요?\n이 작업은 커밋 & 푸시됩니다.",
                 "삭제 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
-            entries.RemoveAll(x => x.Id == entry.Id);
-            await SaveAndPush("remove license '" + entry.Id + "' (" + entry.Owner + ")");
+            var removedIds = selected.ConvertAll(x => x.Id);
+            entries.RemoveAll(delegate(LicenseEntry x) { return removedIds.Contains(x.Id); });
+            foreach (var en in selected) SaveLocalKeyRemoval(en.Id);
+            string commitMsg;
+            if (removedIds.Count == 1)
+                commitMsg = "remove license '" + removedIds[0] + "' (" + selected[0].Owner + ")";
+            else
+                commitMsg = "remove " + removedIds.Count + " licenses (" + string.Join(", ", removedIds.ToArray()) + ")";
+            await SaveAndPush(commitMsg);
             RenderList();
+        }
+
+        private void SaveLocalKeyRemoval(string id)
+        {
+            var dummy = new LicenseEntry { Id = id, KeyPlain = "", CreatedAt = "" };
+            SaveLocalKey(dummy);
         }
 
         private async void ToggleRevoke(bool doRevoke)
         {
             var entry = GetSelected();
             if (entry == null) return;
+            string action = doRevoke ? "폐기" : "복원";
+            string detail = doRevoke
+                ? "폐기된 키는 Hub에서 즉시 사용이 거부됩니다."
+                : "복원하면 해당 키를 다시 사용할 수 있게 됩니다.";
+            var confirm = MessageBox.Show(
+                "키 '" + entry.Id + "' (" + entry.Owner + ") 을/를 " + action + "할까요?\n"
+                + detail + "\n\n이 작업은 커밋 & 푸시됩니다.",
+                action + " 확인", MessageBoxButtons.YesNo,
+                doRevoke ? MessageBoxIcon.Warning : MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
             if (doRevoke)
             {
                 if (!revoked.Contains(entry.Id)) revoked.Add(entry.Id);
@@ -328,9 +465,11 @@ namespace KJ_FlowForge_CreateKey
                     Owner = owner,
                     ExpiresAt = expiry,
                     CreatedAt = DateTime.Now.ToString("yyyy-MM-dd"),
+                    KeyPlain = lastKey,
                 };
             }
             entries.Add(lastEntry);
+            SaveLocalKey(lastEntry);
 
             resultBox.Text = "=== 팀원에게 전달할 키 ===" + Environment.NewLine + lastKey
                            + Environment.NewLine + Environment.NewLine
