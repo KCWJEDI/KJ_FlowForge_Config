@@ -41,6 +41,8 @@ namespace KJ_FlowForge_CreateKey
         private TextBox searchBox;
         private CheckBox filterExpiringCheck, filterRevokedCheck;
         private Button renewButton, copyDetailButton;
+        private Button pushRetryButton;
+        private Button extend30Button, extend90Button, extend365Button;
 
         // 키 발급 탭
         private TextBox idBox, ownerBox, resultBox;
@@ -326,8 +328,10 @@ namespace KJ_FlowForge_CreateKey
             renewButton.Click += (s, e) => StartRenewSelected();
             copyDetailButton = new Button { Text = "상세 복사", Width = S(100), Height = S(32), Enabled = false };
             copyDetailButton.Click += (s, e) => CopySelectedDetails();
+            pushRetryButton = new Button { Text = "푸시 재시도", Width = S(110), Height = S(32) };
+            pushRetryButton.Click += (s, e) => RetryPush();
             topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton,
-                copyKeyButton2, renewButton, copyDetailButton });
+                copyKeyButton2, renewButton, copyDetailButton, pushRetryButton });
 
             // 검색 + 필터 행
             var filterPanel = new FlowLayoutPanel
@@ -344,14 +348,29 @@ namespace KJ_FlowForge_CreateKey
             filterRevokedCheck.CheckedChanged += (s, e) => RenderList();
             filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck });
 
+            // 일괄 연장 행
+            var extendPanel = new FlowLayoutPanel
+            {
+                Location = new Point(S(12), S(106)),
+                Size = new Size(S(720), S(40)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            };
+            extend30Button = new Button { Text = "+30일 연장", Width = S(110), Height = S(32), Enabled = false };
+            extend30Button.Click += (s, e) => ExtendSelected(30);
+            extend90Button = new Button { Text = "+90일 연장", Width = S(110), Height = S(32), Enabled = false };
+            extend90Button.Click += (s, e) => ExtendSelected(90);
+            extend365Button = new Button { Text = "+365일 연장", Width = S(120), Height = S(32), Enabled = false };
+            extend365Button.Click += (s, e) => ExtendSelected(365);
+            extendPanel.Controls.AddRange(new Control[] { extend30Button, extend90Button, extend365Button });
+
             licenseList = new ListView
             {
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(S(12), S(106)),
-                Size = new Size(S(720), S(374)),
+                Location = new Point(S(12), S(152)),
+                Size = new Size(S(720), S(328)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Font = new Font("Consolas", 17f),
             };
@@ -367,7 +386,7 @@ namespace KJ_FlowForge_CreateKey
             var hintLabel = new Label
             {
                 Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
-                Location = new Point(S(12), S(486)),
+                Location = new Point(S(12), S(484)),
                 AutoSize = true,
                 ForeColor = Color.Gray,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
@@ -385,6 +404,7 @@ namespace KJ_FlowForge_CreateKey
                 copyKeyButton2.Enabled = false;
                 renewButton.Enabled = false;
                 copyDetailButton.Enabled = false;
+                extend30Button.Enabled = extend90Button.Enabled = extend365Button.Enabled = false;
                 return;
             }
             var entry = GetSelected();
@@ -393,6 +413,7 @@ namespace KJ_FlowForge_CreateKey
             copyKeyButton2.Enabled = true;
             renewButton.Enabled = true;
             copyDetailButton.Enabled = true;
+            extend30Button.Enabled = extend90Button.Enabled = extend365Button.Enabled = true;
             revokeButton.Enabled = !isRevoked;
             restoreButton.Enabled = isRevoked;
         }
@@ -713,6 +734,100 @@ namespace KJ_FlowForge_CreateKey
 
         // ==================== 상세 복사 ====================
 
+        // ==================== 일괄 연장 ====================
+
+        private async void ExtendSelected(int days)
+        {
+            var selected = GetSelectedList();
+            if (selected.Count == 0) return;
+
+            // 새 만료일 계산: 기존 만료일(또는 오늘) 기준으로 연장, 과거 만료는 오늘부터
+            DateTime now = DateTime.Now;
+            var changes = new List<string>();
+            foreach (var en in selected)
+            {
+                if (revoked.Contains(en.Id)) continue;   // 폐기된 키는 연장 제외
+                DateTime baseDate = now;
+                DateTime expDt;
+                if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt) && expDt > baseDate)
+                    baseDate = expDt;
+                en.ExpiresAt = baseDate.AddDays(days).ToString("yyyy-MM-dd HH:mm");
+                changes.Add(en.Id + ": -> " + en.ExpiresAt);
+            }
+            if (changes.Count == 0)
+            {
+                MessageBox.Show("연장할 수 있는(폐기되지 않은) 선택 항목이 없습니다.", "일괄 연장",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var confirm = MessageBox.Show(
+                "선택한 " + changes.Count + "개 키를 +" + days + "일 연장할까요?\n\n"
+                + string.Join("\n", changes.ToArray()) + "\n\n이 작업은 커밋 & 푸시됩니다.",
+                "일괄 연장 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes)
+            {
+                Reload();   // 취소 시 변경 롤백
+                return;
+            }
+            string commitMsg = "extend " + changes.Count + " license(s) by " + days + " days";
+            await SaveAndPush(commitMsg);
+            RenderList();
+        }
+
+        // ==================== 푸시 재시도 ====================
+
+        private async void RetryPush()
+        {
+            pushRetryButton.Enabled = false;
+            pushRetryButton.Text = "확인 중...";
+            string repoDir = Path.GetDirectoryName(JsonPath);
+            var output = new StringBuilder();
+            int aheadCount = -1;
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = "rev-list --count origin/main..main",
+                    WorkingDirectory = repoDir,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                };
+                using (var p = System.Diagnostics.Process.Start(psi))
+                {
+                    string stdout = p.StandardOutput.ReadToEnd().Trim();
+                    p.WaitForExit(10000);
+                    int.TryParse(stdout, out aheadCount);
+                }
+            }
+            catch { }
+
+            if (aheadCount == 0)
+            {
+                pushRetryButton.Enabled = true;
+                pushRetryButton.Text = "푸시 재시도";
+                MessageBox.Show("밀려난 커밋이 없습니다. 모두 푸시된 상태입니다.", "푸시 재시도",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int exit = RunGitCapture(repoDir, "push origin main", output);
+            pushRetryButton.Enabled = true;
+            pushRetryButton.Text = "푸시 재시도";
+            if (exit == 0 && aheadCount > 0)
+            {
+                MessageBox.Show(aheadCount + "개의 밀려난 커밋을 푸시했습니다.", "푸시 재시도",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (exit != 0)
+            {
+                MessageBox.Show("푸시 실패. 네트워크를 확인 후 다시 시도하세요.\n\n=== Git 출력 ===\n" + output.ToString(),
+                    "푸시 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void CopySelectedDetails()
         {
             var selected = GetSelectedList();
@@ -778,6 +893,14 @@ namespace KJ_FlowForge_CreateKey
 
             var label1 = new Label { Text = "키 ID (구분용, 영문 권장)", Location = new Point(S(20), S(20)), AutoSize = true };
             idBox = new TextBox { Location = new Point(S(20), S(43)), Width = S(500) };
+            // 키 ID: 영문/숫자/하이픈만 허용 (붙여넣기 포함)
+            idBox.KeyPress += (s, e) =>
+            {
+                char c = e.KeyChar;
+                bool ok = char.IsControl(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                       || (c >= '0' && c <= '9') || c == '-' || c == '_';
+                if (!ok) { e.Handled = true; }
+            };
 
             var label2 = new Label { Text = "사용자 이름", Location = new Point(S(20), S(75)), AutoSize = true };
             ownerBox = new TextBox { Location = new Point(S(20), S(98)), Width = S(500) };
@@ -986,6 +1109,18 @@ namespace KJ_FlowForge_CreateKey
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            bool idValidNow = true;
+            foreach (char c in id)
+            {
+                bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+                if (!ok) { idValidNow = false; break; }
+            }
+            if (!idValidNow)
+            {
+                MessageBox.Show("키 ID는 영문, 숫자, 하이픈(-), 밑줄(_)만 사용할 수 있습니다.", "ID 규칙 위반",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             if (expiryDate < DateTime.Now)
             {
                 MessageBox.Show("만료일이 현재 시각보다 이전입니다. 오늘 이후 날짜를 선택해 주세요.",
@@ -1052,7 +1187,7 @@ namespace KJ_FlowForge_CreateKey
 
             string commitMsg = (isRenew ? "renew license '" : "issue license '")
                              + id + "' for '" + owner + "' until " + expiry;
-            bool ok = await SaveAndPush(commitMsg);
+            bool pushOk = await SaveAndPush(commitMsg);
 
             if (isRenew)
             {
@@ -1065,7 +1200,7 @@ namespace KJ_FlowForge_CreateKey
 
             resultBox.Text = resultBox.Text.Replace(
                 "Git 커밋 & 푸시 중...",
-                ok ? "[OK] Git 커밋 & 푸시 완료." : "[FAIL] Git 처리 실패 - 수동 확인 필요.");
+                pushOk ? "[OK] Git 커밋 & 푸시 완료." : "[FAIL] Git 처리 실패 - 수동 확인 필요.");
             Reload();
 
             generateButton.Enabled = true;
