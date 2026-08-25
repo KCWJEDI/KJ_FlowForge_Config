@@ -59,6 +59,9 @@ namespace KJ_FlowForge_CreateKey
         private readonly Dictionary<Control, ZoomInfo> zoomInfoMap = new Dictionary<Control, ZoomInfo>();
         private Size baseClientSize;
         private Size baseMinimumSize;
+        private string tabsBaseFontFamily = "";
+        private float tabsBaseFontSize;
+        private FontStyle tabsBaseFontStyle;
 
         private class ZoomInfo
         {
@@ -127,6 +130,8 @@ namespace KJ_FlowForge_CreateKey
             float factor = uiZoom / DesignScale;
 
             SuspendAllLayout(this);
+            // 탭 컨트롤 자체 폰트(머리글 "발급 현황"/"키 발급" 포함)
+            try { tabs.Font = new Font(tabsBaseFontFamily, tabsBaseFontSize * factor, tabsBaseFontStyle); } catch { }
             // 폰트 먼저 변경(라벨 AutoSize 재계산), 이후 위치 복원
             foreach (var pair in zoomInfoMap)
             {
@@ -202,6 +207,9 @@ namespace KJ_FlowForge_CreateKey
             tabs.TabPages.Add(issueTab);
 
             Controls.Add(tabs);
+            tabsBaseFontFamily = tabs.Font.FontFamily.Name;
+            tabsBaseFontSize = tabs.Font.Size;
+            tabsBaseFontStyle = tabs.Font.Style;
             // Ctrl+휠 줌 필터 등록
             var wheelFilter = new CtrlWheelFilter(this);
             Application.AddMessageFilter(wheelFilter);
@@ -436,6 +444,53 @@ namespace KJ_FlowForge_CreateKey
                 item.SubItems.Add(en.KeyPlain.Length > 0 ? en.KeyPlain : "(로컬 기록 없음)");
                 item.ForeColor = color;
                 licenseList.Items.Add(item);
+            }
+            FitWindowToKeyContent();
+        }
+
+        // 발급 키 내용이 다 보이도록 첫 렌더링 시 창/열 폭을 자동 맞춤 (1회)
+        private bool windowAutoFitted = false;
+        private void FitWindowToKeyContent()
+        {
+            if (windowAutoFitted || licenseList.Items.Count == 0) return;
+            windowAutoFitted = true;
+            int maxKeyWidth = 0;
+            using (var g = licenseList.CreateGraphics())
+            {
+                foreach (ListViewItem item in licenseList.Items)
+                {
+                    string keyText = item.SubItems[5].Text;
+                    if (keyText.Length == 0) continue;
+                    int w = (int)Math.Ceiling(g.MeasureString(keyText, licenseList.Font).Width) + 40;
+                    if (w > maxKeyWidth) maxKeyWidth = w;
+                }
+            }
+            if (maxKeyWidth <= 0) return;
+            AdjustKeyColumnWidth();
+            int lastCol = licenseList.Columns.Count - 1;
+            if (licenseList.Columns[lastCol].Width < maxKeyWidth)
+                licenseList.Columns[lastCol].Width = maxKeyWidth;
+
+            // 열 폭 합계가 ListView 안에 다 들어가도록 창 폭 계산
+            int totalColumns = 0;
+            foreach (ColumnHeader col in licenseList.Columns) totalColumns += col.Width;
+            int neededLvWidth = totalColumns + SystemInformation.VerticalScrollBarWidth + 8;
+            int currentLvWidth = licenseList.Width;
+            int deficit = neededLvWidth - currentLvWidth;
+            if (deficit > 0)
+            {
+                // 창을 늘려도 화면 밖으로 나가지 않게 상한 적용
+                Rectangle workArea = Screen.FromControl(this).WorkingArea;
+                int maxFormW = workArea.Width - 16;
+                int newClientW = ClientSize.Width + deficit;
+                if (newClientW + 16 > maxFormW)
+                {
+                    newClientW = Math.Max(0, maxFormW - 16);
+                }
+                ClientSize = new Size(newClientW, ClientSize.Height);
+                Location = new Point(
+                    Math.Max(workArea.Left, Location.X - ((newClientW - ClientSize.Width) / 2)),
+                    Location.Y);
             }
         }
 
