@@ -50,6 +50,141 @@ namespace KJ_FlowForge_CreateKey
         private List<LicenseEntry> entries = new List<LicenseEntry>();
         private List<string> revoked = new List<string>();
 
+        // ===== Ctrl+마우스휠 UI 배율 조절 =====
+        private float uiZoom = 1.8f;
+        private const float DesignScale = 1.8f;   // 최초 디자인 배율
+        private const float ZoomStep = 0.1f;
+        private const float ZoomMin = 1.0f;
+        private const float ZoomMax = 3.0f;
+        private readonly Dictionary<Control, ZoomInfo> zoomInfoMap = new Dictionary<Control, ZoomInfo>();
+        private Size baseClientSize;
+        private Size baseMinimumSize;
+
+        private class ZoomInfo
+        {
+            public Rectangle Bounds;
+            public bool HasOwnFont;
+            public string FontFamily = "";
+            public float FontSize;
+            public FontStyle FontStyle;
+            public int[] ColumnWidths;
+        }
+
+        private class CtrlWheelFilter : IMessageFilter
+        {
+            private readonly MainForm owner;
+            public CtrlWheelFilter(MainForm owner) { this.owner = owner; }
+            public bool PreFilterMessage(ref Message m)
+            {
+                // WM_MOUSEWHEEL (0x20A) + Ctrl 키 → 줌 처리 후 이벤트 소비
+                if (m.Msg == 0x20A && (Control.ModifierKeys & Keys.Control) == Keys.Control)
+                {
+                    int delta = (short)((long)m.WParam >> 16);
+                    owner.ApplyZoom(delta > 0 ? ZoomStep : -ZoomStep);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // 최초 표시 시점의 컨트롤 위치/폰트를 기준으로 저장
+        private void CaptureZoomBase()
+        {
+            zoomInfoMap.Clear();
+            CollectZoomInfo(tabs);
+        }
+
+        private void CollectZoomInfo(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                var info = new ZoomInfo
+                {
+                    Bounds = c.Bounds,
+                    HasOwnFont = true,
+                    FontFamily = c.Font.FontFamily.Name,
+                    FontSize = c.Font.Size,
+                    FontStyle = c.Font.Style,
+                };
+                var listView = c as ListView;
+                if (listView != null)
+                {
+                    info.ColumnWidths = new int[listView.Columns.Count];
+                    for (int i = 0; i < listView.Columns.Count; i++)
+                        info.ColumnWidths[i] = listView.Columns[i].Width;
+                }
+                zoomInfoMap[c] = info;
+                if (c.Controls.Count > 0) CollectZoomInfo(c);
+            }
+        }
+
+        private void ApplyZoom(float delta)
+        {
+            if (zoomInfoMap.Count == 0) return;
+            float newZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, uiZoom + delta));
+            if (Math.Abs(newZoom - uiZoom) < 0.001f) return;
+            uiZoom = newZoom;
+            float factor = uiZoom / DesignScale;
+
+            SuspendAllLayout(this);
+            // 폰트 먼저 변경(라벨 AutoSize 재계산), 이후 위치 복원
+            foreach (var pair in zoomInfoMap)
+            {
+                var c = pair.Key;
+                var info = pair.Value;
+                try { c.Font = new Font(info.FontFamily, info.FontSize * factor, info.FontStyle); } catch { }
+            }
+            foreach (var pair in zoomInfoMap)
+            {
+                var c = pair.Key;
+                var b = pair.Value.Bounds;
+                c.Bounds = new Rectangle(
+                    (int)Math.Round(b.X * factor),
+                    (int)Math.Round(b.Y * factor),
+                    (int)Math.Round(b.Width * factor),
+                    (int)Math.Round(b.Height * factor));
+            }
+            ClientSize = new Size(
+                (int)Math.Round(baseClientSize.Width * factor),
+                (int)Math.Round(baseClientSize.Height * factor));
+            MinimumSize = new Size(
+                (int)Math.Round(baseMinimumSize.Width * factor),
+                (int)Math.Round(baseMinimumSize.Height * factor));
+
+            var lv = licenseList;
+            if (zoomInfoMap.ContainsKey(lv))
+            {
+                var widths = zoomInfoMap[lv].ColumnWidths;
+                for (int i = 0; i < widths.Length && i < lv.Columns.Count; i++)
+                    lv.Columns[i].Width = (int)Math.Round(widths[i] * factor);
+            }
+            ResumeAllLayout(this);
+            AdjustKeyColumnWidth();
+        }
+
+        private void SuspendAllLayout(Control root)
+        {
+            root.SuspendLayout();
+            foreach (Control c in root.Controls) SuspendAllLayout(c);
+        }
+
+        private void ResumeAllLayout(Control root)
+        {
+            foreach (Control c in root.Controls) ResumeAllLayout(c);
+            root.ResumeLayout(true);
+        }
+
+        // 발급 현황 마지막 열("발급 키")을 남은 폭만큼 자동 확장
+        private void AdjustKeyColumnWidth()
+        {
+            if (licenseList == null || licenseList.Columns.Count == 0) return;
+            int others = 0;
+            for (int i = 0; i < licenseList.Columns.Count - 1; i++)
+                others += licenseList.Columns[i].Width;
+            int remaining = licenseList.ClientSize.Width - others;
+            licenseList.Columns[licenseList.Columns.Count - 1].Width = Math.Max(S(120), remaining);
+        }
+
         public MainForm()
         {
             Text = "KJ FlowForge - 라이선스 관리";
@@ -57,6 +192,8 @@ namespace KJ_FlowForge_CreateKey
             Size = new Size(1380, 1010);
             MinimumSize = new Size(1200, 900);
             StartPosition = FormStartPosition.CenterScreen;
+            baseClientSize = ClientSize;
+            baseMinimumSize = MinimumSize;
 
             tabs = new TabControl { Dock = DockStyle.Fill };
             var issueTab = BuildIssueTab();
@@ -65,6 +202,12 @@ namespace KJ_FlowForge_CreateKey
             tabs.TabPages.Add(issueTab);
 
             Controls.Add(tabs);
+            // Ctrl+휠 줌 필터 등록
+            var wheelFilter = new CtrlWheelFilter(this);
+            Application.AddMessageFilter(wheelFilter);
+            FormClosed += (s, e) => Application.RemoveMessageFilter(wheelFilter);
+            Shown += (s, e) => CaptureZoomBase();
+            Resize += (s, e) => AdjustKeyColumnWidth();
             Load += (s, e) => Reload();
         }
 
