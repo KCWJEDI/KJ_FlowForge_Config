@@ -40,7 +40,7 @@ namespace KJ_FlowForge_CreateKey
         private Button refreshButton, deleteButton, revokeButton, restoreButton;
         private Button copyKeyButton2;
         private TextBox searchBox;
-        private CheckBox filterExpiringCheck, filterRevokedCheck;
+        private CheckBox filterExpiringCheck, filterRevokedCheck, filterAdminCheck;
         private Button renewButton, copyDetailButton;
         private Button pushRetryButton;
         private Button extend30Button, extend90Button, extend365Button;
@@ -350,7 +350,9 @@ namespace KJ_FlowForge_CreateKey
             filterExpiringCheck.CheckedChanged += (s, e) => RenderList();
             filterRevokedCheck = new CheckBox { Text = "폐기된 것만", AutoSize = true };
             filterRevokedCheck.CheckedChanged += (s, e) => RenderList();
-            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck });
+            filterAdminCheck = new CheckBox { Text = "관리자만", AutoSize = true };
+            filterAdminCheck.CheckedChanged += (s, e) => RenderList();
+            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck, filterAdminCheck });
 
             // 일괄 연장 행
             var extendPanel = new FlowLayoutPanel
@@ -578,6 +580,8 @@ namespace KJ_FlowForge_CreateKey
                 }
                 // 폐기 필터: 폐기된 키만
                 if (filterRevokedCheck != null && filterRevokedCheck.Checked && !isRevoked) continue;
+                // 관리자 필터: role이 admin인 키만
+                if (filterAdminCheck != null && filterAdminCheck.Checked && en.Role != "admin") continue;
 
                 if (isRevoked) { status = "폐기됨"; color = Color.DarkRed; }
                 else if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
