@@ -1055,7 +1055,8 @@ namespace KJ_FlowForge_CreateKey
                 Width = S(180),
                 Height = S(36),
             };
-            generateButton.Font = new Font(generateButton.Font, FontStyle.Bold);
+            // 다른 컨트롤과 동일한 크기(폼 기본 폰트) + 볼드만 적용
+            generateButton.Font = new Font(Font, FontStyle.Bold);
             generateButton.Click += OnGenerate;
 
             copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(207)), Width = S(90), Height = S(32), Enabled = false };
