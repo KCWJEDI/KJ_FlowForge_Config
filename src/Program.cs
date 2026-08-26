@@ -40,7 +40,7 @@ namespace KJ_FlowForge_CreateKey
         private Button refreshButton, deleteButton, revokeButton, restoreButton;
         private Button copyKeyButton2;
         private TextBox searchBox;
-        private CheckBox filterExpiringCheck, filterRevokedCheck, filterAdminCheck;
+        private CheckBox filterExpiringCheck, filterRevokedCheck, filterAdminCheck, filterUserCheck;
         private Button renewButton, copyDetailButton;
         private Button pushRetryButton;
         private Button extend30Button, extend90Button, extend365Button;
@@ -351,8 +351,19 @@ namespace KJ_FlowForge_CreateKey
             filterRevokedCheck = new CheckBox { Text = "폐기된 것만", AutoSize = true };
             filterRevokedCheck.CheckedChanged += (s, e) => RenderList();
             filterAdminCheck = new CheckBox { Text = "관리자만", AutoSize = true };
-            filterAdminCheck.CheckedChanged += (s, e) => RenderList();
-            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck, filterAdminCheck });
+            filterUserCheck = new CheckBox { Text = "유저만", AutoSize = true };
+            // 관리자만/유저만은 동시에 선택 불가 (배타적 필터)
+            filterAdminCheck.CheckedChanged += (s, e) =>
+            {
+                if (filterAdminCheck.Checked) filterUserCheck.Checked = false;
+                RenderList();
+            };
+            filterUserCheck.CheckedChanged += (s, e) =>
+            {
+                if (filterUserCheck.Checked) filterAdminCheck.Checked = false;
+                RenderList();
+            };
+            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck, filterAdminCheck, filterUserCheck });
 
             // 일괄 연장 행
             var extendPanel = new FlowLayoutPanel
@@ -582,6 +593,8 @@ namespace KJ_FlowForge_CreateKey
                 if (filterRevokedCheck != null && filterRevokedCheck.Checked && !isRevoked) continue;
                 // 관리자 필터: role이 admin인 키만
                 if (filterAdminCheck != null && filterAdminCheck.Checked && en.Role != "admin") continue;
+                // 유저 필터: role이 admin이 아닌 키만 (role 없는 기존 키 포함)
+                if (filterUserCheck != null && filterUserCheck.Checked && en.Role == "admin") continue;
 
                 if (isRevoked) { status = "폐기됨"; color = Color.DarkRed; }
                 else if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
