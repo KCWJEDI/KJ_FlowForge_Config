@@ -51,6 +51,7 @@ namespace KJ_FlowForge_CreateKey
         private Label typedDateLabel;
         private ComboBox expiryHourBox, expiryMinuteBox;
         private CheckBox expiryTimeCheck;
+        private CheckBox expiryEnabledCheck;
         private CheckBox adminCheck;
         private Button generateButton, copyKeyButton;
         private Button cancelRenewButton;
@@ -720,6 +721,8 @@ namespace KJ_FlowForge_CreateKey
             idBox.ReadOnly = true;               // 갱신 중에는 ID 변경 불가
             ownerBox.Text = entry.Owner;
             adminCheck.Checked = entry.Role == "admin";   // 기존 role 유지 (변경 가능)
+            bool entryHasExpiry = entry.ExpiresAt.Length > 0;
+            expiryEnabledCheck.Checked = entryHasExpiry;  // 기존 만료일 유무 반영
             cancelRenewButton.Enabled = true;
             cancelRenewButton.Visible = true;
             resultBox.Text = "";
@@ -733,6 +736,7 @@ namespace KJ_FlowForge_CreateKey
             idBox.ReadOnly = false;
             generateButton.Text = "키 생성 & 저장소 반영";
             adminCheck.Checked = false;
+            expiryEnabledCheck.Checked = true;
             cancelRenewButton.Enabled = false;
             cancelRenewButton.Visible = false;
             resultBox.Text = "";
@@ -913,7 +917,13 @@ namespace KJ_FlowForge_CreateKey
             var label2 = new Label { Text = "사용자 이름", Location = new Point(S(20), S(75)), AutoSize = true };
             ownerBox = new TextBox { Location = new Point(S(20), S(98)), Width = S(500) };
 
-            var label3 = new Label { Text = "만료일 (체크 해제 시 무기한)", Location = new Point(S(20), S(130)), AutoSize = true };
+            expiryEnabledCheck = new CheckBox
+            {
+                Text = "만료일 지정 (체크 해제 시 무기한)",
+                Location = new Point(S(20), S(128)),
+                AutoSize = true,
+                Checked = true,
+            };
             expiryPicker = new DateTimePicker
             {
                 Location = new Point(S(20), S(153)),
@@ -963,7 +973,7 @@ namespace KJ_FlowForge_CreateKey
             };
             expiryPicker.LostFocus += (s, e) => { typedDigits = ""; UpdateTypedDateLabel(); };
             BuildIssueTabControls();
-            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryPicker,
+            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, expiryEnabledCheck, expiryPicker,
                 adminCheck,
                 typedDateLabel,
                 expiryTimeCheck, expiryHourBox, expiryMinuteBox,
@@ -1063,6 +1073,15 @@ namespace KJ_FlowForge_CreateKey
                 expiryHourBox.Enabled = expiryTimeCheck.Checked;
                 expiryMinuteBox.Enabled = expiryTimeCheck.Checked;
             };
+            // 만료일 미지정(무기한) 시 달력/시간 입력 전체 비활성화
+            expiryEnabledCheck.CheckedChanged += (s, e) =>
+            {
+                bool on = expiryEnabledCheck.Checked;
+                expiryPicker.Enabled = on;
+                expiryTimeCheck.Enabled = on;
+                expiryHourBox.Enabled = on && expiryTimeCheck.Checked;
+                expiryMinuteBox.Enabled = on && expiryTimeCheck.Checked;
+            };
 
             generateButton = new Button
             {
@@ -1105,19 +1124,20 @@ namespace KJ_FlowForge_CreateKey
         {
             string id = idBox.Text.Trim();
             string owner = ownerBox.Text.Trim();
+            bool hasExpiry = expiryEnabledCheck.Checked;
             DateTime expiryDate = expiryPicker.Value.Date;
-            if (expiryTimeCheck.Checked)
+            if (hasExpiry && expiryTimeCheck.Checked)
             {
                 expiryDate = expiryDate.AddHours(expiryHourBox.SelectedIndex)
                                      .AddMinutes(expiryMinuteBox.SelectedIndex);
             }
-            else
+            else if (hasExpiry)
             {
                 // 시간 미지정 시 해당 날짜의 끝(23:59)까지 유효하도록 처리
                 expiryDate = expiryDate.AddDays(1).AddSeconds(-1);
             }
-            string expiry = expiryDate.ToString("yyyy-MM-dd");
-            if (expiryTimeCheck.Checked)
+            string expiry = hasExpiry ? expiryDate.ToString("yyyy-MM-dd") : "";
+            if (hasExpiry && expiryTimeCheck.Checked)
                 expiry += " " + expiryDate.ToString("HH:mm");
 
             if (id.Length == 0 || owner.Length == 0)
@@ -1138,7 +1158,7 @@ namespace KJ_FlowForge_CreateKey
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (expiryDate < DateTime.Now)
+            if (hasExpiry && expiryDate < DateTime.Now)
             {
                 MessageBox.Show("만료일이 현재 시각보다 이전입니다. 오늘 이후 날짜를 선택해 주세요.",
                     "만료일 오류",
@@ -1204,7 +1224,8 @@ namespace KJ_FlowForge_CreateKey
             resultBox.Visible = true;
 
             string commitMsg = (isRenew ? "renew license '" : "issue license '")
-                             + id + "' for '" + owner + "' until " + expiry;
+                             + id + "' for '" + owner + "'"
+                             + (expiry.Length > 0 ? " until " + expiry : " (no expiry)");
             bool pushOk = await SaveAndPush(commitMsg);
 
             if (isRenew)
