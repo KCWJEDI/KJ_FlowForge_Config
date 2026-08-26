@@ -16,6 +16,7 @@ namespace KJ_FlowForge_CreateKey
         public string Owner = "";
         public string ExpiresAt = "";
         public string CreatedAt = "";
+        public string Role = "";   // "admin" | ""(일반)
         public string KeyPlain = "";   // 로컬 전용 (keys.local.json)
     }
 
@@ -50,6 +51,7 @@ namespace KJ_FlowForge_CreateKey
         private Label typedDateLabel;
         private ComboBox expiryHourBox, expiryMinuteBox;
         private CheckBox expiryTimeCheck;
+        private CheckBox adminCheck;
         private Button generateButton, copyKeyButton;
         private Button cancelRenewButton;
         private string lastKey = "";
@@ -217,7 +219,7 @@ namespace KJ_FlowForge_CreateKey
 
         private int ColumnHeaderMinWidth(int index)
         {
-            int[] mins = { S(120), S(100), S(90), S(70), S(90), S(120) };
+            int[] mins = { S(120), S(100), S(90), S(70), S(60), S(90), S(120) };
             return index < mins.Length ? mins[index] : S(80);
         }
 
@@ -378,6 +380,7 @@ namespace KJ_FlowForge_CreateKey
             licenseList.Columns.Add("사용자", 250);
             licenseList.Columns.Add("만료일", 180);
             licenseList.Columns.Add("상태", 140);
+            licenseList.Columns.Add("역할", 90);
             licenseList.Columns.Add("생성일", 180);
             licenseList.Columns.Add("발급 키", 430);
             licenseList.SelectedIndexChanged += OnListSelectionChanged;
@@ -588,8 +591,10 @@ namespace KJ_FlowForge_CreateKey
                 item.SubItems.Add(en.Owner);
                 item.SubItems.Add(en.ExpiresAt.Length > 0 ? en.ExpiresAt : "-");
                 item.SubItems.Add(status);
+                item.SubItems.Add(en.Role == "admin" ? "관리자" : "일반");
                 item.SubItems.Add(en.CreatedAt.Length > 0 ? en.CreatedAt : "-");
                 item.SubItems.Add(en.KeyPlain.Length > 0 ? en.KeyPlain : "(로컬 기록 없음)");
+                if (en.Role == "admin" && !isRevoked) color = Color.Firebrick;
                 item.ForeColor = color;
                 licenseList.Items.Add(item);
             }
@@ -714,6 +719,7 @@ namespace KJ_FlowForge_CreateKey
             idBox.Text = entry.Id;
             idBox.ReadOnly = true;               // 갱신 중에는 ID 변경 불가
             ownerBox.Text = entry.Owner;
+            adminCheck.Checked = entry.Role == "admin";   // 기존 role 유지 (변경 가능)
             cancelRenewButton.Enabled = true;
             cancelRenewButton.Visible = true;
             resultBox.Text = "";
@@ -726,6 +732,7 @@ namespace KJ_FlowForge_CreateKey
             renewTarget = null;
             idBox.ReadOnly = false;
             generateButton.Text = "키 생성 & 저장소 반영";
+            adminCheck.Checked = false;
             cancelRenewButton.Enabled = false;
             cancelRenewButton.Visible = false;
             resultBox.Text = "";
@@ -837,6 +844,7 @@ namespace KJ_FlowForge_CreateKey
             {
                 string line = "ID: " + en.Id + " / 사용자: " + en.Owner + " / 만료: "
                             + (en.ExpiresAt.Length > 0 ? en.ExpiresAt : "무기한")
+                            + " / 역할: " + (en.Role == "admin" ? "관리자" : "일반")
                             + (en.KeyPlain.Length > 0 ? " / 키: " + en.KeyPlain : "");
                 lines.Add(line);
             }
@@ -956,6 +964,7 @@ namespace KJ_FlowForge_CreateKey
             expiryPicker.LostFocus += (s, e) => { typedDigits = ""; UpdateTypedDateLabel(); };
             BuildIssueTabControls();
             page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, label3, expiryPicker,
+                adminCheck,
                 typedDateLabel,
                 expiryTimeCheck, expiryHourBox, expiryMinuteBox,
                 generateButton, copyKeyButton, cancelRenewButton, resultBox });
@@ -1023,6 +1032,13 @@ namespace KJ_FlowForge_CreateKey
                 Text = "시간 지정",
                 Location = new Point(S(180), S(155)),
                 AutoSize = true,
+            };
+            adminCheck = new CheckBox
+            {
+                Text = "관리자",
+                Location = new Point(S(410), S(155)),
+                AutoSize = true,
+                ForeColor = Color.Firebrick,
             };
             expiryHourBox = new ComboBox
             {
@@ -1168,6 +1184,7 @@ namespace KJ_FlowForge_CreateKey
                     Owner = owner,
                     ExpiresAt = expiry,
                     CreatedAt = DateTime.Now.ToString("yyyy-MM-dd"),
+                    Role = adminCheck.Checked ? "admin" : "",
                     KeyPlain = lastKey,
                 };
             }
@@ -1219,6 +1236,7 @@ namespace KJ_FlowForge_CreateKey
                 Owner = Str(obj, "owner"),
                 ExpiresAt = Str(obj, "expiresAt"),
                 CreatedAt = Str(obj, "createdAt"),
+                Role = Str(obj, "role") == "admin" ? "admin" : "",   // 생략/오타 값은 일반 사용자
             };
         }
 
@@ -1241,6 +1259,8 @@ namespace KJ_FlowForge_CreateKey
                     fields.Add("\"expiresAt\": \"" + Escape(en.ExpiresAt) + "\"");
                 if (en.CreatedAt.Length > 0)
                     fields.Add("\"createdAt\": \"" + Escape(en.CreatedAt) + "\"");
+                if (en.Role == "admin")
+                    fields.Add("\"role\": \"admin\"");
                 sb.Append("    { ");
                 sb.Append(string.Join(", ", fields));
                 sb.AppendLine(i < allEntries.Count - 1 ? " }," : " }");
