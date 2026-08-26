@@ -41,6 +41,8 @@ namespace KJ_FlowForge_CreateKey
         private Button copyKeyButton2;
         private TextBox searchBox;
         private CheckBox filterExpiringCheck, filterRevokedCheck, filterAdminCheck, filterUserCheck;
+        private int sortColumnIndex = -1;   // -1 = 기본(등록) 순서
+        private int sortState = 0;          // 0=기본, 1=오름차순, 2=내림차순
         private Button renewButton, copyDetailButton;
         private Button pushRetryButton;
         private Button extend30Button, extend90Button, extend365Button;
@@ -400,6 +402,7 @@ namespace KJ_FlowForge_CreateKey
             licenseList.Columns.Add("발급 키", 430);
             licenseList.SelectedIndexChanged += OnListSelectionChanged;
             licenseList.DoubleClick += (s, e) => CopySelectedKeys();
+            licenseList.ColumnClick += OnColumnSortClick;
 
             var hintLabel = new Label
             {
@@ -566,7 +569,16 @@ namespace KJ_FlowForge_CreateKey
             licenseList.Items.Clear();
             DateTime now = DateTime.Today;
             string query = searchBox != null ? searchBox.Text.Trim().ToLowerInvariant() : "";
-            foreach (var en in entries)
+            // 정렬: entries 복사 후 클릭 상태에 따라 순서 결정
+            var ordered = entries;
+            if (sortColumnIndex >= 0 && sortState > 0)
+            {
+                int col = sortColumnIndex;
+                bool desc = sortState == 2;
+                ordered = entries.OrderBy(en => SortKeyFor(en, col)).ThenBy(en => en.Id).ToList();
+                if (desc) ordered.Reverse();
+            }
+            foreach (var en in ordered)
             {
                 string status;
                 Color color = Color.Black;
@@ -618,6 +630,70 @@ namespace KJ_FlowForge_CreateKey
                 licenseList.Items.Add(item);
             }
             FitWindowToKeyContent();
+        }
+
+        private string SortKeyFor(LicenseEntry en, int col)
+        {
+            switch (col)
+            {
+                case 0: return en.Id.ToLowerInvariant();
+                case 1: return en.Owner.ToLowerInvariant();
+                case 2:
+                    // 만료일 없음(무기한)은 가장 뒤로
+                    if (en.ExpiresAt.Length == 0) return "9999-99-99";
+                    DateTime d;
+                    return DateTime.TryParse(en.ExpiresAt, out d)
+                        ? d.ToString("yyyy-MM-dd HH:mm")
+                        : "9998";
+                case 3:
+                    // 상태 우선순위: 유효 < D-n < 만료 < 폐기됨 (문자열 기준)
+                    if (revoked.Contains(en.Id)) return "3";
+                    DateTime expDt;
+                    if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
+                    {
+                        double left = (expDt - DateTime.Today).TotalDays;
+                        if (left < 0) return "2";
+                        if (left <= 7) return "1";
+                    }
+                    return "0";
+                case 4: return en.Role == "admin" ? "1" : "0";
+                case 5:
+                    if (en.CreatedAt.Length == 0) return "9999-99-99";
+                    DateTime c;
+                    return DateTime.TryParse(en.CreatedAt, out c) ? c.ToString("yyyy-MM-dd HH:mm") : "9998";
+                case 6: return en.KeyPlain.ToLowerInvariant();
+                default: return "";
+            }
+        }
+
+        // 열 머리글 클릭 시 오름차순 -> 내림차순 -> 기본 순환
+        private void OnColumnSortClick(object sender, ColumnClickEventArgs e)
+        {
+            if (e.Column == sortColumnIndex)
+                sortState = (sortState + 1) % 3;
+            else
+            {
+                sortColumnIndex = e.Column;
+                sortState = 1;
+            }
+            UpdateSortHeaderHint();
+            RenderList();
+        }
+
+        // 현재 정렬 상태를 열 머리글 텍스트에 표시 (▲ / ▼ / 없음)
+        private void UpdateSortHeaderHint()
+        {
+            string[] baseNames = { "키 ID", "사용자", "만료일", "상태", "역할", "생성일", "발급 키" };
+            for (int i = 0; i < licenseList.Columns.Count && i < baseNames.Length; i++)
+            {
+                string suffix = "";
+                if (i == sortColumnIndex)
+                {
+                    if (sortState == 1) suffix = " ▲";
+                    else if (sortState == 2) suffix = " ▼";
+                }
+                licenseList.Columns[i].Text = baseNames[i] + suffix;
+            }
         }
 
         // 발급 키 내용이 다 보이도록 첫 렌더링 시 창/열 폭을 자동 맞춤 (1회)
