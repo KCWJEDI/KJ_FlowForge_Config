@@ -52,7 +52,7 @@ namespace KJ_FlowForge_CreateKey
         private ComboBox expiryHourBox, expiryMinuteBox;
         private CheckBox expiryTimeCheck;
         private CheckBox expiryDateCheck;
-        private CheckBox expiryEnabledCheck;
+        private Label expiryLabel;
         private CheckBox adminCheck;
         private Button generateButton, copyKeyButton;
         private Button cancelRenewButton;
@@ -596,7 +596,7 @@ namespace KJ_FlowForge_CreateKey
                 item.SubItems.Add(en.Role == "admin" ? "관리자" : "일반");
                 item.SubItems.Add(en.CreatedAt.Length > 0 ? en.CreatedAt : "-");
                 item.SubItems.Add(en.KeyPlain.Length > 0 ? en.KeyPlain : "(로컬 기록 없음)");
-                if (en.Role == "admin" && !isRevoked) color = Color.Firebrick;
+                if (en.Role == "admin" && !isRevoked) color = Color.Purple;
                 item.ForeColor = color;
                 licenseList.Items.Add(item);
             }
@@ -723,9 +723,8 @@ namespace KJ_FlowForge_CreateKey
             ownerBox.Text = entry.Owner;
             adminCheck.Checked = entry.Role == "admin";   // 기존 role 유지 (변경 가능)
             bool entryHasExpiry = entry.ExpiresAt.Length > 0;
-            expiryEnabledCheck.Checked = entryHasExpiry;  // 기존 만료일 유무 반영
-            expiryDateCheck.Enabled = entryHasExpiry;
-            expiryDateCheck.Checked = true;
+            expiryDateCheck.Checked = entryHasExpiry;     // 기존 만료일 유무 반영
+            expiryTimeCheck.Checked = entryHasExpiry && entry.ExpiresAt.Contains(" ");
             cancelRenewButton.Enabled = true;
             cancelRenewButton.Visible = true;
             resultBox.Text = "";
@@ -739,9 +738,8 @@ namespace KJ_FlowForge_CreateKey
             idBox.ReadOnly = false;
             generateButton.Text = "키 생성 & 저장소 반영";
             adminCheck.Checked = false;
-            expiryEnabledCheck.Checked = true;
-            expiryDateCheck.Enabled = true;
             expiryDateCheck.Checked = true;
+            expiryTimeCheck.Checked = false;
             cancelRenewButton.Enabled = false;
             cancelRenewButton.Visible = false;
             resultBox.Text = "";
@@ -922,12 +920,11 @@ namespace KJ_FlowForge_CreateKey
             var label2 = new Label { Text = "사용자 이름", Location = new Point(S(20), S(75)), AutoSize = true };
             ownerBox = new TextBox { Location = new Point(S(20), S(98)), Width = S(500) };
 
-            expiryEnabledCheck = new CheckBox
+            expiryLabel = new Label
             {
-                Text = "만료일 지정 (체크 해제 시 무기한)",
+                Text = "만료일 (날짜·시간 모두 해제 시 무기한)",
                 Location = new Point(S(20), S(128)),
                 AutoSize = true,
-                Checked = true,
             };
             expiryDateCheck = new CheckBox
             {
@@ -985,7 +982,7 @@ namespace KJ_FlowForge_CreateKey
             };
             expiryPicker.LostFocus += (s, e) => { typedDigits = ""; UpdateTypedDateLabel(); };
             BuildIssueTabControls();
-            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, expiryEnabledCheck,
+            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, expiryLabel,
                 expiryDateCheck, expiryPicker,
                 adminCheck,
                 typedDateLabel,
@@ -1089,18 +1086,16 @@ namespace KJ_FlowForge_CreateKey
             // 날짜 미지정 시 달력만 비활성화(시간 지정은 독립 동작)
             expiryDateCheck.CheckedChanged += (s, e) =>
             {
-                expiryPicker.Enabled = expiryEnabledCheck.Checked && expiryDateCheck.Checked;
+                expiryPicker.Enabled = expiryDateCheck.Checked;
             };
-            // 만료일 미지정(무기한) 시 달력/시간 입력 전체 비활성화
-            expiryEnabledCheck.CheckedChanged += (s, e) =>
+            // 날짜·시간 모두 해제 시 무기한 안내 문구를 라벨에 표시
+            EventHandler UpdateExpiryLabel = (s, e) =>
             {
-                bool on = expiryEnabledCheck.Checked;
-                expiryDateCheck.Enabled = on;
-                expiryPicker.Enabled = on && expiryDateCheck.Checked;
-                expiryTimeCheck.Enabled = on;
-                expiryHourBox.Enabled = on && expiryTimeCheck.Checked;
-                expiryMinuteBox.Enabled = on && expiryTimeCheck.Checked;
+                bool unlimited = !expiryDateCheck.Checked && !expiryTimeCheck.Checked;
+                expiryLabel.Text = unlimited ? "만료일: 무기한" : "만료일 (날짜·시간 모두 해제 시 무기한)";
             };
+            expiryDateCheck.CheckedChanged += UpdateExpiryLabel;
+            expiryTimeCheck.CheckedChanged += UpdateExpiryLabel;
 
             generateButton = new Button
             {
@@ -1143,8 +1138,9 @@ namespace KJ_FlowForge_CreateKey
         {
             string id = idBox.Text.Trim();
             string owner = ownerBox.Text.Trim();
-            bool hasExpiry = expiryEnabledCheck.Checked;
-            // 날짜 미지정 시 오늘 날짜 기준으로 처리 (시간 미지정 시 그날 끝과 대응)
+            // 날짜·시간 모두 해제 시 무기한
+            bool hasExpiry = expiryDateCheck.Checked || expiryTimeCheck.Checked;
+            // 날짜 미지정 시 오늘 날짜 기준으로 처리
             DateTime expiryDate = expiryDateCheck.Checked ? expiryPicker.Value.Date : DateTime.Today;
             if (hasExpiry && expiryTimeCheck.Checked)
             {
