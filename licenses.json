@@ -4,5 +4,5 @@
     { "id": "Admin", "hash": "65c4a26583c3b6566b7da9fb63a9a62f12fc49f3e9b18bf7f73c3462e5a2fac0", "owner": "KCWJEDI", "createdAt": "2026-08-26", "role": "admin" },
     { "id": "User1", "hash": "d213e069ceb6517131bc25e2e8d19fcfc30afa4155cfdfc133a8398fdb92150d", "owner": "KCWUser1", "expiresAt": "2026-09-25", "createdAt": "2026-08-26" }
   ],
-  "revoked": ["kcwjeditestkey0167", "test1", "v23gf", "efef", "3f3ff33f", "Test1"]
+  "revoked": ["kcwjeditestkey0167", "test1", "v23gf", "efef", "3f3ff33f", "Test1", "Admin"]
 }
