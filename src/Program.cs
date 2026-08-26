@@ -51,6 +51,7 @@ namespace KJ_FlowForge_CreateKey
         private Label typedDateLabel;
         private ComboBox expiryHourBox, expiryMinuteBox;
         private CheckBox expiryTimeCheck;
+        private CheckBox expiryDateCheck;
         private CheckBox expiryEnabledCheck;
         private CheckBox adminCheck;
         private Button generateButton, copyKeyButton;
@@ -723,6 +724,8 @@ namespace KJ_FlowForge_CreateKey
             adminCheck.Checked = entry.Role == "admin";   // 기존 role 유지 (변경 가능)
             bool entryHasExpiry = entry.ExpiresAt.Length > 0;
             expiryEnabledCheck.Checked = entryHasExpiry;  // 기존 만료일 유무 반영
+            expiryDateCheck.Enabled = entryHasExpiry;
+            expiryDateCheck.Checked = true;
             cancelRenewButton.Enabled = true;
             cancelRenewButton.Visible = true;
             resultBox.Text = "";
@@ -737,6 +740,8 @@ namespace KJ_FlowForge_CreateKey
             generateButton.Text = "키 생성 & 저장소 반영";
             adminCheck.Checked = false;
             expiryEnabledCheck.Checked = true;
+            expiryDateCheck.Enabled = true;
+            expiryDateCheck.Checked = true;
             cancelRenewButton.Enabled = false;
             cancelRenewButton.Visible = false;
             resultBox.Text = "";
@@ -924,10 +929,17 @@ namespace KJ_FlowForge_CreateKey
                 AutoSize = true,
                 Checked = true,
             };
+            expiryDateCheck = new CheckBox
+            {
+                Text = "날짜 지정",
+                Location = new Point(S(20), S(154)),
+                AutoSize = true,
+                Checked = true,
+            };
             expiryPicker = new DateTimePicker
             {
-                Location = new Point(S(20), S(153)),
-                Width = S(150),
+                Location = new Point(S(140), S(151)),
+                Width = S(145),
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "yyyy-MM-dd",
                 MinDate = DateTime.Today,
@@ -973,7 +985,8 @@ namespace KJ_FlowForge_CreateKey
             };
             expiryPicker.LostFocus += (s, e) => { typedDigits = ""; UpdateTypedDateLabel(); };
             BuildIssueTabControls();
-            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, expiryEnabledCheck, expiryPicker,
+            page.Controls.AddRange(new Control[] { label1, idBox, label2, ownerBox, expiryEnabledCheck,
+                expiryDateCheck, expiryPicker,
                 adminCheck,
                 typedDateLabel,
                 expiryTimeCheck, expiryHourBox, expiryMinuteBox,
@@ -1032,7 +1045,7 @@ namespace KJ_FlowForge_CreateKey
             typedDateLabel = new Label
             {
                 Text = "",
-                Location = new Point(S(20), S(182)),
+                Location = new Point(S(20), S(214)),
                 AutoSize = true,
                 ForeColor = SystemColors.HotTrack,
                 Font = new Font("Consolas", 17f, FontStyle.Bold),
@@ -1040,28 +1053,28 @@ namespace KJ_FlowForge_CreateKey
             expiryTimeCheck = new CheckBox
             {
                 Text = "시간 지정",
-                Location = new Point(S(180), S(155)),
+                Location = new Point(S(20), S(184)),
                 AutoSize = true,
             };
             adminCheck = new CheckBox
             {
                 Text = "관리자",
-                Location = new Point(S(410), S(155)),
+                Location = new Point(S(300), S(154)),
                 AutoSize = true,
                 ForeColor = Color.Firebrick,
             };
             expiryHourBox = new ComboBox
             {
-                Location = new Point(S(265), S(153)),
-                Width = S(60),
+                Location = new Point(S(140), S(181)),
+                Width = S(55),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Enabled = false,
             };
             for (int h = 0; h < 24; h++) expiryHourBox.Items.Add(h.ToString("00"));
             expiryMinuteBox = new ComboBox
             {
-                Location = new Point(S(330), S(153)),
-                Width = S(60),
+                Location = new Point(S(200), S(181)),
+                Width = S(55),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Enabled = false,
             };
@@ -1073,11 +1086,17 @@ namespace KJ_FlowForge_CreateKey
                 expiryHourBox.Enabled = expiryTimeCheck.Checked;
                 expiryMinuteBox.Enabled = expiryTimeCheck.Checked;
             };
+            // 날짜 미지정 시 달력만 비활성화(시간 지정은 독립 동작)
+            expiryDateCheck.CheckedChanged += (s, e) =>
+            {
+                expiryPicker.Enabled = expiryEnabledCheck.Checked && expiryDateCheck.Checked;
+            };
             // 만료일 미지정(무기한) 시 달력/시간 입력 전체 비활성화
             expiryEnabledCheck.CheckedChanged += (s, e) =>
             {
                 bool on = expiryEnabledCheck.Checked;
-                expiryPicker.Enabled = on;
+                expiryDateCheck.Enabled = on;
+                expiryPicker.Enabled = on && expiryDateCheck.Checked;
                 expiryTimeCheck.Enabled = on;
                 expiryHourBox.Enabled = on && expiryTimeCheck.Checked;
                 expiryMinuteBox.Enabled = on && expiryTimeCheck.Checked;
@@ -1086,7 +1105,7 @@ namespace KJ_FlowForge_CreateKey
             generateButton = new Button
             {
                 Text = "키 생성 & 저장소 반영",
-                Location = new Point(S(20), S(205)),
+                Location = new Point(S(20), S(242)),
                 Width = S(180),
                 Height = S(36),
             };
@@ -1094,13 +1113,13 @@ namespace KJ_FlowForge_CreateKey
             generateButton.Font = new Font(Font, FontStyle.Bold);
             generateButton.Click += OnGenerate;
 
-            copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(207)), Width = S(90), Height = S(32), Enabled = false };
+            copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(244)), Width = S(90), Height = S(32), Enabled = false };
             copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) Clipboard.SetText(lastKey); };
 
             cancelRenewButton = new Button
             {
                 Text = "갱신 취소",
-                Location = new Point(S(310), S(207)),
+                Location = new Point(S(310), S(244)),
                 Size = new Size(S(100), S(32)),
                 Visible = false,
             };
@@ -1108,7 +1127,7 @@ namespace KJ_FlowForge_CreateKey
 
             resultBox = new TextBox
             {
-                Location = new Point(S(20), S(250)),
+                Location = new Point(S(20), S(287)),
                 Width = 500,
                 Height = 220,
                 Multiline = true,
@@ -1125,7 +1144,8 @@ namespace KJ_FlowForge_CreateKey
             string id = idBox.Text.Trim();
             string owner = ownerBox.Text.Trim();
             bool hasExpiry = expiryEnabledCheck.Checked;
-            DateTime expiryDate = expiryPicker.Value.Date;
+            // 날짜 미지정 시 오늘 날짜 기준으로 처리 (시간 미지정 시 그날 끝과 대응)
+            DateTime expiryDate = expiryDateCheck.Checked ? expiryPicker.Value.Date : DateTime.Today;
             if (hasExpiry && expiryTimeCheck.Checked)
             {
                 expiryDate = expiryDate.AddHours(expiryHourBox.SelectedIndex)
