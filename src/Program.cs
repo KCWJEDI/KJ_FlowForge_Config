@@ -26,6 +26,7 @@ namespace KJ_FlowForge_CreateKey
         private static readonly string JsonPath = Path.Combine(ExeDir, "licenses.json");
         private static readonly string LocalKeysPath = Path.Combine(ExeDir, "keys.local.json");
         private static readonly string SettingsPath = Path.Combine(ExeDir, "ui.settings.json");
+        private static readonly string HistoryPath = Path.Combine(ExeDir, "operation.history.json");
         private static readonly string BackupDirPath = @"W:\WorkSpace\KJ_FlowForge_Config_Backup";
         public static string TestJsonPath { get { return JsonPath; } }
 
@@ -46,6 +47,10 @@ namespace KJ_FlowForge_CreateKey
         private Button renewButton, copyDetailButton;
         private Button pushRetryButton;
         private Button extend30Button, extend90Button, extend365Button;
+        private Button verifyButton;
+        private Label gitStatusLabel;
+        private System.Windows.Forms.FlowLayoutPanel dashboardPanel;
+        private ListView historyList;
 
         // 키 발급 탭
         private TextBox idBox, ownerBox, resultBox;
@@ -64,6 +69,16 @@ namespace KJ_FlowForge_CreateKey
 
         private List<LicenseEntry> entries = new List<LicenseEntry>();
         private List<string> revoked = new List<string>();
+
+        // ===== 작업 이력(감사) 로컬 전용 =====
+        private List<Dictionary<string, object>> historyItems = new List<Dictionary<string, object>>();
+
+        // ===== 대시보드 필터 상태 (클릭 시 목록에 반영) =====
+        private string dashboardFilter = "";
+
+        // ===== 민감 클립보드 자동 삭제 (키 원문 보호) =====
+        private Timer clipboardClearTimer;
+        private int clipboardGuardSeconds = 60;
 
         // ===== Ctrl+마우스휠 UI 배율 조절 =====
         private float uiZoom = 1.8f;
@@ -253,8 +268,10 @@ namespace KJ_FlowForge_CreateKey
             tabs = new TabControl { Dock = DockStyle.Fill };
             var issueTab = BuildIssueTab();
             var listTab = BuildListTab();
+            var historyTab = BuildHistoryTab();
             tabs.TabPages.Add(listTab);
             tabs.TabPages.Add(issueTab);
+            tabs.TabPages.Add(historyTab);
 
             Controls.Add(tabs);
             tabsBaseFontFamily = tabs.Font.FontFamily.Name;
@@ -267,8 +284,65 @@ namespace KJ_FlowForge_CreateKey
             Shown += (s, e) => CaptureZoomBase();
             FormClosing += (s, e) => SaveUiSettings();
             Resize += (s, e) => AutoFitAllColumns();
-            Load += (s, e) => Reload();
+            Load += (s, e) => { LoadHistory(); Reload(); UpdateGitStatusLabel(); };
             Shown += (s, e) => { BackupLocalKeys(); ShowExpiryAlert(); };
+        }
+
+        // ==================== 작업 이력 탭 ====================
+
+        private TabPage BuildHistoryTab()
+        {
+            var page = new TabPage("작업 이력");
+            var info = new Label
+            {
+                Text = "※ 로컬 전용 감사 이력입니다. (키 원문/해시는 저장하지 않음)",
+                Location = new Point(S(12), S(12)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+            };
+            var refreshHist = new Button
+            {
+                Text = "새로고침",
+                Location = new Point(S(12), S(42)),
+                Width = S(110),
+                Height = S(32),
+            };
+            refreshHist.Click += (s, e) => { LoadHistory(); ReloadHistoryList(); };
+            var clearHist = new Button
+            {
+                Text = "이력 비우기",
+                Location = new Point(S(130), S(42)),
+                Width = S(110),
+                Height = S(32),
+            };
+            clearHist.Click += (s, e) =>
+            {
+                if (MessageBox.Show("로컬 작업 이력을 모두 비울까요?", "이력 초기화",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                {
+                    historyItems.Clear();
+                    SaveHistory();
+                    ReloadHistoryList();
+                }
+            };
+            historyList = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                HideSelection = false,
+                Location = new Point(S(12), S(84)),
+                Size = new Size(S(760), S(400)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                Font = new Font("맑은 고딕", 14f),
+            };
+            historyList.Columns.Add("시각", 160);
+            historyList.Columns.Add("작업", 90);
+            historyList.Columns.Add("대상", 170);
+            historyList.Columns.Add("상세", 380);
+            historyList.Columns.Add("상태", 90);
+            page.Controls.AddRange(new Control[] { info, refreshHist, clearHist, historyList });
+            return page;
         }
 
         // ==================== 설정 저장/복원 (배율 기억) ====================
@@ -314,9 +388,31 @@ namespace KJ_FlowForge_CreateKey
         {
             var page = new TabPage("발급 현황");
 
+            // Git 동기화 상태 표시
+            gitStatusLabel = new Label
+            {
+                Text = "Git: 확인 중...",
+                Location = new Point(S(12), S(12)),
+                AutoSize = true,
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
+            };
+            gitStatusLabel.Click += (s, e) => { gitStatusLabel.Text = "Git: 확인 중..."; UpdateGitStatusLabel(); };
+
+            // 클릭 가능한 대시보드 요약 (전체 / 유효 / 관리자 / 유저 / 임박 / 만료 / 폐기)
+            dashboardPanel = new FlowLayoutPanel
+            {
+                Location = new Point(S(12), S(44)),
+                Size = new Size(S(720), S(42)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                AutoSize = false,
+            };
+            BuildDashboardLinks();
+
             var topPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(12)),
+                Location = new Point(S(12), S(92)),
                 Size = new Size(S(720), S(42)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
@@ -336,13 +432,18 @@ namespace KJ_FlowForge_CreateKey
             copyDetailButton.Click += (s, e) => CopySelectedDetails();
             pushRetryButton = new Button { Text = "푸시 재시도", Width = S(110), Height = S(32) };
             pushRetryButton.Click += (s, e) => RetryPush();
+            verifyButton = new Button { Text = "검증", Width = S(70), Height = S(32), Enabled = false };
+            verifyButton.Click += (s, e) =>
+            {
+                MessageBox.Show(ValidateSelectedKey(), "키 검증", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
             topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton,
-                copyKeyButton2, renewButton, copyDetailButton, pushRetryButton });
+                copyKeyButton2, renewButton, copyDetailButton, verifyButton, pushRetryButton });
 
             // 검색 + 필터 행
             var filterPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(60)),
+                Location = new Point(S(12), S(140)),
                 Size = new Size(S(720), S(40)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
@@ -370,7 +471,7 @@ namespace KJ_FlowForge_CreateKey
             // 일괄 연장 행
             var extendPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(106)),
+                Location = new Point(S(12), S(186)),
                 Size = new Size(S(720), S(40)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
@@ -388,7 +489,7 @@ namespace KJ_FlowForge_CreateKey
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(S(12), S(152)),
+                Location = new Point(S(12), S(232)),
                 Size = new Size(S(720), S(328)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Font = new Font("Consolas", 17f),
@@ -416,14 +517,87 @@ namespace KJ_FlowForge_CreateKey
             var hintLabel = new Label
             {
                 Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
-                Location = new Point(S(12), S(484)),
+                Location = new Point(S(12), S(566)),
                 AutoSize = true,
                 ForeColor = Color.Gray,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             };
 
-            page.Controls.AddRange(new Control[] { topPanel, filterPanel, licenseList, hintLabel });
+            page.Controls.AddRange(new Control[] { gitStatusLabel, dashboardPanel, topPanel, filterPanel, licenseList, hintLabel });
             return page;
+        }
+
+        // 대시보드 링크 버튼 생성 (개수 표시 + 클릭 시 필터)
+        private List<Button> dashboardButtons = new List<Button>();
+        private void BuildDashboardLinks()
+        {
+            dashboardButtons.Clear();
+            string[] labels = { "전체", "유효", "관리자", "유저", "만료임박", "만료", "폐기" };
+            foreach (var label in labels)
+            {
+                var b = new Button
+                {
+                    Text = label + " 0",
+                    Width = S(96),
+                    Height = S(32),
+                    BackColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                };
+                string key = label;
+                b.Click += (s, e) =>
+                {
+                    if (dashboardFilter == key) dashboardFilter = "";
+                    else dashboardFilter = key;
+                    SyncFilterFromDashboard();
+                    RenderList();
+                };
+                dashboardButtons.Add(b);
+                dashboardPanel.Controls.Add(b);
+            }
+        }
+
+        private void RefreshDashboardCounts()
+        {
+            if (dashboardPanel == null || dashboardButtons.Count == 0) return;
+            DateTime now = DateTime.Today;
+            string[] keys = { "전체", "유효", "관리자", "유저", "만료임박", "만료", "폐기" };
+            int[] counts = new int[keys.Length];
+            foreach (var en in entries)
+            {
+                counts[0]++; // 전체
+                bool isRevoked = revoked.Contains(en.Id);
+                DateTime expDt = DateTime.MinValue;
+                bool hasExp = en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt);
+                bool isExpired = hasExp && expDt < now;
+                bool isSoon = !isRevoked && !isExpired && hasExp && (expDt - now).TotalDays <= 7;
+                if (!isRevoked && !isExpired) counts[1]++; // 유효
+                if (en.Role == "admin") counts[2]++;      // 관리자
+                else counts[3]++;                        // 유저
+                if (isSoon) counts[4]++;                 // 만료임박
+                if (isExpired) counts[5]++;              // 만료
+                if (isRevoked) counts[6]++;              // 폐기
+            }
+            for (int i = 0; i < dashboardButtons.Count && i < keys.Length; i++)
+            {
+                dashboardButtons[i].Text = keys[i] + " " + counts[i];
+                dashboardButtons[i].BackColor = (dashboardFilter == keys[i]) ? Color.LightSteelBlue : Color.White;
+            }
+        }
+
+        private void SyncFilterFromDashboard()
+        {
+            // 대시보드 필터와 기존 체크박스/검색 연동
+            bool admin = dashboardFilter == "관리자";
+            bool user = dashboardFilter == "유저";
+            bool expiring = dashboardFilter == "만료임박";
+            bool revokedOnly = dashboardFilter == "폐기";
+            bool expiredOnly = dashboardFilter == "만료";
+            // 기존 체크박스와 일치시키되, "만료"/"유효"/"전체" 등은 체크박스가 없으므로
+            // 검색/체크박스는 그대로 두고 RenderList의 dashboardFilter를 활용.
+            filterAdminCheck.Checked = admin;
+            filterUserCheck.Checked = user;
+            filterExpiringCheck.Checked = expiring;
+            filterRevokedCheck.Checked = revokedOnly;
         }
 
         private void OnListSelectionChanged(object sender, EventArgs e)
@@ -435,6 +609,7 @@ namespace KJ_FlowForge_CreateKey
                 renewButton.Enabled = false;
                 copyDetailButton.Enabled = false;
                 extend30Button.Enabled = extend90Button.Enabled = extend365Button.Enabled = false;
+                verifyButton.Enabled = false;
                 return;
             }
             var entry = GetSelected();
@@ -446,6 +621,7 @@ namespace KJ_FlowForge_CreateKey
             extend30Button.Enabled = extend90Button.Enabled = extend365Button.Enabled = true;
             revokeButton.Enabled = !isRevoked;
             restoreButton.Enabled = isRevoked;
+            verifyButton.Enabled = licenseList.SelectedItems.Count == 1;
         }
 
         private LicenseEntry GetSelected()
@@ -590,12 +766,26 @@ namespace KJ_FlowForge_CreateKey
             foreach (var en in ordered)
             {
                 string status;
+                bool skipped = false;
                 Color color = Color.Black;
                 DateTime expDt;
                 bool isRevoked = revoked.Contains(en.Id);
                 int daysLeft = int.MinValue;
                 if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
                     daysLeft = (int)(expDt - now).TotalDays;
+
+                // 대시보드 필터 적용 (전체는 제외)
+                if (dashboardFilter == "관리자" && en.Role != "admin") skipped = true;
+                else if (dashboardFilter == "유저" && en.Role == "admin") skipped = true;
+                else if (dashboardFilter == "만료" && !(en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt) && expDt < now)) skipped = true;
+                else if (dashboardFilter == "유효" && (isRevoked || (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt) && expDt < now))) skipped = true;
+                else if (dashboardFilter == "폐기" && !isRevoked) skipped = true;
+                else if (dashboardFilter == "만료임박")
+                {
+                    if (isRevoked || en.ExpiresAt.Length == 0 || !DateTime.TryParse(en.ExpiresAt, out expDt)) skipped = true;
+                    else { int dl = (int)(expDt - now).TotalDays; if (dl < 0 || dl > 7) skipped = true; }
+                }
+                if (skipped) continue;
 
                 // 검색 필터 (ID / 사용자 / 키)
                 if (query.Length > 0)
@@ -638,6 +828,7 @@ namespace KJ_FlowForge_CreateKey
                 item.ForeColor = color;
                 licenseList.Items.Add(item);
             }
+            RefreshDashboardCounts();
             FitWindowToKeyContent();
         }
 
@@ -750,7 +941,7 @@ namespace KJ_FlowForge_CreateKey
                     "복사 불가", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            Clipboard.SetText(string.Join(Environment.NewLine, lines.ToArray()));
+            SetSensitiveClipboard(string.Join(Environment.NewLine, lines.ToArray()));
         }
 
         private async void DeleteSelected()
@@ -766,6 +957,12 @@ namespace KJ_FlowForge_CreateKey
                 summary + " 을/를 완전히 삭제할까요?\n이 작업은 커밋 & 푸시됩니다.",
                 "삭제 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
+            if (!CreateSnapshotBackup())
+            {
+                MessageBox.Show("백업 스냅샷 생성에 실패하여 삭제를 중단합니다.", "백업 오류",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
             var removedIds = selected.ConvertAll(x => x.Id);
             entries.RemoveAll(delegate(LicenseEntry x) { return removedIds.Contains(x.Id); });
             foreach (var en in selected) SaveLocalKeyRemoval(en.Id);
@@ -782,6 +979,264 @@ namespace KJ_FlowForge_CreateKey
         {
             var dummy = new LicenseEntry { Id = id, KeyPlain = "", CreatedAt = "" };
             SaveLocalKey(dummy);
+        }
+
+        // ==================== 작업 이력(감사) ====================
+        // 주의: 이력에는 키 원문, 키 해시, 키가 포함된 상세 문자열을 절대 저장하지 않는다.
+
+        private void LoadHistory()
+        {
+            historyItems.Clear();
+            try
+            {
+                if (!File.Exists(HistoryPath)) return;
+                string raw = File.ReadAllText(HistoryPath);
+                int pos = 0;
+                SkipWs(raw, ref pos);
+                if (pos >= raw.Length || raw[pos] != '[') return;
+                var arr = ParseArray(raw, ref pos);
+                foreach (var item in arr)
+                {
+                    var dict = item as Dictionary<string, object>;
+                    if (dict != null) historyItems.Add(dict);
+                }
+                if (historyItems.Count > 2000)
+                    historyItems.RemoveRange(0, historyItems.Count - 2000);
+            }
+            catch { }
+        }
+
+        private void SaveHistory()
+        {
+            try
+            {
+                var sb = new StringBuilder("[");
+                for (int i = 0; i < historyItems.Count; i++)
+                {
+                    var item = historyItems[i];
+                    var fields = new List<string>();
+                    foreach (var kv in item)
+                    {
+                        if (kv.Value == null) continue;
+                        string val = kv.Value.ToString();
+                        if (val.Length == 0) continue;
+                        fields.Add("\"" + Escape(kv.Key) + "\": \"" + Escape(val) + "\"");
+                    }
+                    sb.Append("{ " + string.Join(", ", fields.ToArray()) + " }");
+                    if (i < historyItems.Count - 1) sb.Append(",");
+                }
+                sb.Append("]");
+                File.WriteAllText(HistoryPath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private void AppendHistory(string action, string targetId, string detail, string status)
+        {
+            var item = new Dictionary<string, object>
+            {
+                { "at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "action", action },
+                { "target", targetId },
+                { "detail", detail },
+                { "status", status },
+            };
+            historyItems.Add(item);
+            if (historyItems.Count > 2000)
+                historyItems.RemoveRange(0, historyItems.Count - 2000);
+            SaveHistory();
+            ReloadHistoryList();
+        }
+
+        // 새 항목을 목록 맨 앞(아래/최근)으로 정렬해 반환
+        private void ReloadHistoryList()
+        {
+            if (historyList == null) return;
+            historyList.Items.Clear();
+            var sorted = historyItems.OrderByDescending(x => Str(x, "at")).ToList();
+            foreach (var it in sorted)
+            {
+                string status = Str(it, "status");
+                var item = new ListViewItem(Str(it, "at"));
+                item.SubItems.Add(Str(it, "action"));
+                item.SubItems.Add(Str(it, "target"));
+                item.SubItems.Add(Str(it, "detail"));
+                item.SubItems.Add(status);
+                Color c = Color.Black;
+                if (status == "성공") c = Color.DarkGreen;
+                else if (status == "실패") c = Color.Red;
+                else if (status == "푸시 필요") c = Color.OrangeRed;
+                item.ForeColor = c;
+                historyList.Items.Add(item);
+            }
+        }
+
+        // ==================== 민감 클립보드 자동 삭제 ====================
+        private string LastSensitiveClipboard = "";
+
+        private void SetSensitiveClipboard(string text)
+        {
+            LastSensitiveClipboard = text ?? "";
+            Clipboard.SetText(LastSensitiveClipboard);
+            if (clipboardClearTimer == null)
+            {
+                clipboardClearTimer = new Timer();
+                clipboardClearTimer.Interval = clipboardGuardSeconds * 1000;
+                clipboardClearTimer.Tick += (s, e) => TryClearSensitiveClipboard();
+                clipboardClearTimer.Start();
+            }
+            else
+            {
+                clipboardClearTimer.Stop();
+                clipboardClearTimer.Start();
+            }
+        }
+
+        private void TryClearSensitiveClipboard()
+        {
+            if (clipboardClearTimer != null) clipboardClearTimer.Stop();
+            try
+            {
+                string current = Clipboard.ContainsText() ? Clipboard.GetText() : "";
+                if (LastSensitiveClipboard.Length > 0 && current == LastSensitiveClipboard)
+                    Clipboard.Clear();
+            }
+            catch { }
+        }
+
+        // ==================== 백업 스냅샷 ====================
+        private bool CreateSnapshotBackup()
+        {
+            try
+            {
+                Directory.CreateDirectory(BackupDirPath);
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + "_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                string folder = Path.Combine(BackupDirPath, stamp);
+                Directory.CreateDirectory(folder);
+                if (File.Exists(JsonPath))
+                    File.Copy(JsonPath, Path.Combine(folder, "licenses.json"), true);
+                if (File.Exists(LocalKeysPath))
+                    File.Copy(LocalKeysPath, Path.Combine(folder, "keys.local.json"), true);
+                // 최근 30개만 보존
+                var dirs = Directory.GetDirectories(BackupDirPath).OrderByDescending(d => d).ToList();
+                for (int i = 30; i < dirs.Count; i++)
+                {
+                    try { Directory.Delete(dirs[i], true); } catch { }
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ==================== Git 동기화 상태 ====================
+        private string GetGitStatusText()
+        {
+            string repoDir = Path.GetDirectoryName(JsonPath);
+            try
+            {
+                // 충돌 우선
+                int unmerged = RunGitCapture(repoDir, "diff --name-only --diff-filter=U");
+                if (unmerged >= 0)
+                {
+                    var changed = GetChangedFiles();
+                    if (changedContainsConflict(changed))
+                        return "충돌";
+                }
+                int ahead = RunGitCaptureCount(repoDir, "rev-list --count origin/main..main");
+                int behind = RunGitCaptureCount(repoDir, "rev-list --count main..origin/main");
+                if (ahead < 0 || behind < 0)
+                {
+                    // origin/main 없음 또는 명령 실패
+                    bool hasChanges = GetDirtyFlag(repoDir);
+                    return hasChanges ? "푸시 필요" : "동기화 완료";
+                }
+                bool dirty = GetDirtyFlag(repoDir);
+                if (ahead > 0 || behind > 0 || dirty)
+                {
+                    if (behind > 0) return ahead > 0 || dirty ? "충돌 위험" : "원격 변경";
+                    return "푸시 필요";
+                }
+                return "동기화 완료";
+            }
+            catch
+            {
+                return "알 수 없음";
+            }
+        }
+
+        private bool changedContainsConflict(List<string> files)
+        {
+            return false; // 실제 충돌은 unmerged 출력 시 exit code가 1 이상으로 판별
+        }
+
+        private List<string> GetChangedFiles()
+        {
+            var result = new List<string>();
+            string repoDir = Path.GetDirectoryName(JsonPath);
+            var sb = new StringBuilder();
+            RunGitCapture(repoDir, "status --porcelain", sb);
+            foreach (var line in sb.ToString().Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (line.Trim().Length > 0) result.Add(line);
+            }
+            return result;
+        }
+
+        private bool GetDirtyFlag(string repoDir)
+        {
+            var sb = new StringBuilder();
+            RunGitCapture(repoDir, "status --porcelain", sb);
+            return sb.ToString().Trim().Length > 0;
+        }
+
+        private int RunGitCaptureCount(string workdir, string args)
+        {
+            var sb = new StringBuilder();
+            int exit = RunGitCapture(workdir, args, sb);
+            int val;
+            if (int.TryParse(sb.ToString().Trim(), out val)) return val;
+            return -1;
+        }
+
+        // ==================== 키 검증 ====================
+        private string ValidateSelectedKey()
+        {
+            var entry = GetSelected();
+            if (entry == null) return "선택된 키가 없습니다.";
+            if (entry.KeyPlain.Length == 0)
+                return "로컬 키 기록이 없습니다. (프로그램에서 발급된 키만 검증 가능)";
+            string localHash;
+            using (var sha = SHA256.Create())
+            {
+                byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(entry.KeyPlain));
+                localHash = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+            }
+            string stage = "유효";
+            if (!string.Equals(localHash, entry.Hash, StringComparison.OrdinalIgnoreCase))
+                stage = "해시 불일치";
+            else if (revoked.Contains(entry.Id))
+                stage = "폐기됨";
+            else if (entry.ExpiresAt.Length > 0)
+            {
+                DateTime expDt;
+                if (DateTime.TryParse(entry.ExpiresAt, out expDt))
+                {
+                    if (expDt < DateTime.Now) stage = "만료";
+                    else
+                    {
+                        int daysLeft = (int)(expDt - DateTime.Today).TotalDays;
+                        if (daysLeft <= 7) stage = "D-" + daysLeft;
+                    }
+                }
+            }
+            string role = entry.Role == "admin" ? "관리자" : "일반";
+            return "키 ID: " + entry.Id + "\n사용자: " + entry.Owner + "\n역할: " + role
+                 + "\n만료: " + (entry.ExpiresAt.Length > 0 ? entry.ExpiresAt : "무기한")
+                 + "\n결과: " + stage
+                 + "\n(hash " + (string.Equals(localHash, entry.Hash, StringComparison.OrdinalIgnoreCase) ? "일치" : "불일치") + ")";
         }
 
         // ==================== 만료 알림 ====================
@@ -857,9 +1312,10 @@ namespace KJ_FlowForge_CreateKey
             var selected = GetSelectedList();
             if (selected.Count == 0) return;
 
-            // 새 만료일 계산: 기존 만료일(또는 오늘) 기준으로 연장, 과거 만료는 오늘부터
+            // 새 만료일 계산(후보만 저장, 아직 메모리 변경 안 함)
             DateTime now = DateTime.Now;
             var changes = new List<string>();
+            var newExpiry = new Dictionary<string, string>();
             foreach (var en in selected)
             {
                 if (revoked.Contains(en.Id)) continue;   // 폐기된 키는 연장 제외
@@ -867,8 +1323,9 @@ namespace KJ_FlowForge_CreateKey
                 DateTime expDt;
                 if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt) && expDt > baseDate)
                     baseDate = expDt;
-                en.ExpiresAt = baseDate.AddDays(days).ToString("yyyy-MM-dd HH:mm");
-                changes.Add(en.Id + ": -> " + en.ExpiresAt);
+                string nd = baseDate.AddDays(days).ToString("yyyy-MM-dd HH:mm");
+                newExpiry[en.Id] = nd;
+                changes.Add(en.Id + ": -> " + nd);
             }
             if (changes.Count == 0)
             {
@@ -880,10 +1337,16 @@ namespace KJ_FlowForge_CreateKey
                 "선택한 " + changes.Count + "개 키를 +" + days + "일 연장할까요?\n\n"
                 + string.Join("\n", changes.ToArray()) + "\n\n이 작업은 커밋 & 푸시됩니다.",
                 "일괄 연장 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (confirm != DialogResult.Yes)
+            if (confirm != DialogResult.Yes) return;
+            if (!CreateSnapshotBackup())
             {
-                Reload();   // 취소 시 변경 롤백
+                MessageBox.Show("백업 스냅샷 생성에 실패하여 연장을 중단합니다.", "백업 오류",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
+            }
+            foreach (var en in selected)
+            {
+                if (newExpiry.ContainsKey(en.Id)) en.ExpiresAt = newExpiry[en.Id];
             }
             string commitMsg = "extend " + changes.Count + " license(s) by " + days + " days";
             await SaveAndPush(commitMsg);
@@ -936,6 +1399,7 @@ namespace KJ_FlowForge_CreateKey
             {
                 MessageBox.Show(aheadCount + "개의 밀려난 커밋을 푸시했습니다.", "푸시 재시도",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateGitStatusLabel();
             }
             else if (exit != 0)
             {
@@ -957,7 +1421,7 @@ namespace KJ_FlowForge_CreateKey
                             + (en.KeyPlain.Length > 0 ? " / 키: " + en.KeyPlain : "");
                 lines.Add(line);
             }
-            Clipboard.SetText(string.Join(Environment.NewLine, lines.ToArray()));
+            SetSensitiveClipboard(string.Join(Environment.NewLine, lines.ToArray()));
         }
 
         // ==================== 로컬 키 백업 ====================
@@ -988,10 +1452,22 @@ namespace KJ_FlowForge_CreateKey
                 action + " 확인", MessageBoxButtons.YesNo,
                 doRevoke ? MessageBoxIcon.Warning : MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
+            string revokeReason = "";
+            if (doRevoke)
+            {
+                revokeReason = PromptForRevokeReason(entry.Id);
+                if (revokeReason == null) return;   // 취소
+            }
+            if (!CreateSnapshotBackup())
+            {
+                MessageBox.Show("백업 스냅샷 생성에 실패하여 작업을 중단합니다.", "백업 오류",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
             if (doRevoke)
             {
                 if (!revoked.Contains(entry.Id)) revoked.Add(entry.Id);
-                await SaveAndPush("revoke license '" + entry.Id + "'");
+                await SaveAndPush("revoke license '" + entry.Id + "'" + (revokeReason.Length > 0 ? " (" + TrimMsg(revokeReason) + ")" : ""));
             }
             else
             {
@@ -1000,6 +1476,48 @@ namespace KJ_FlowForge_CreateKey
             }
             RenderList();
             OnListSelectionChanged(null, null);
+        }
+
+        // 폐기 사유 입력창 (취소 시 null 반환, 빈 값 거부)
+        private string PromptForRevokeReason(string id)
+        {
+            var dlg = new Form
+            {
+                Text = "폐기 사유 입력",
+                ClientSize = new Size(S(480), S(190)),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                Font = Font,
+            };
+            var lb = new Label
+            {
+                Text = "키 '" + id + "' 을(를) 폐기하는 사유를 입력하세요.",
+                Location = new Point(S(15), S(15)),
+                AutoSize = true,
+            };
+            var tb = new TextBox
+            {
+                Location = new Point(S(15), S(50)),
+                Size = new Size(S(430), S(80)),
+                Multiline = true,
+            };
+            var ok = new Button { Text = "확인", DialogResult = DialogResult.OK, Location = new Point(S(250), S(140)), Width = S(90) };
+            var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, Location = new Point(S(350), S(140)), Width = S(90) };
+            dlg.Controls.Add(lb); dlg.Controls.Add(tb); dlg.Controls.Add(ok); dlg.Controls.Add(cancel);
+            dlg.AcceptButton = ok;
+            dlg.CancelButton = cancel;
+            string result = "";
+            while (true)
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+                result = tb.Text.Trim();
+                if (result.Length > 0) break;
+                MessageBox.Show(this, "폐기 사유를 입력해 주세요.", "폐기 사유",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            return result;
         }
 
         // ==================== 키 발급 탭 ====================
@@ -1211,7 +1729,7 @@ namespace KJ_FlowForge_CreateKey
             generateButton.Click += OnGenerate;
 
             copyKeyButton = new Button { Text = "키 복사", Location = new Point(S(210), S(244)), Width = S(90), Height = S(32), Enabled = false };
-            copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) Clipboard.SetText(lastKey); };
+            copyKeyButton.Click += (s, e) => { if (lastKey.Length > 0) SetSensitiveClipboard(lastKey); };
 
             cancelRenewButton = new Button
             {
@@ -1299,6 +1817,15 @@ namespace KJ_FlowForge_CreateKey
 
             generateButton.Enabled = false;
             generateButton.Text = "처리 중...";
+
+            if (!CreateSnapshotBackup())
+            {
+                MessageBox.Show("백업 스냅샷 생성에 실패하여 발급을 중단합니다.", "백업 오류",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                generateButton.Enabled = true;
+                generateButton.Text = (renewTarget != null) ? "갱신 & 저장소 반영" : "키 생성 & 저장소 반영";
+                return;
+            }
 
             byte[] bytes = new byte[18];
             using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(bytes);
@@ -1526,8 +2053,45 @@ namespace KJ_FlowForge_CreateKey
 
         // ==================== 파일 쓰기 & Git push ====================
 
+        private string ExtractId(string msg, string prefix)
+        {
+            try
+            {
+                if (msg == null || !msg.StartsWith(prefix)) return "";
+                int start = prefix.Length;
+                int end = msg.IndexOf("'", start);
+                if (end < 0) return "";
+                return msg.Substring(start, end - start);
+            }
+            catch { return ""; }
+        }
+
+        private string TrimMsg(string s)
+        {
+            if (s == null) return "";
+            return s.Length > 80 ? s.Substring(0, 80) : s;
+        }
+
+        private void UpdateGitStatusLabel()
+        {
+            try
+            {
+                if (gitStatusLabel == null) return;
+                gitStatusLabel.Text = "Git: " + GetGitStatusText();
+            }
+            catch { }
+        }
+
         private async System.Threading.Tasks.Task<bool> SaveAndPush(string commitMessage)
         {
+            string action = "변경";
+            string targetId = "";
+            if (commitMessage.StartsWith("issue license '")) { action = "발급"; targetId = ExtractId(commitMessage, "issue license '"); }
+            else if (commitMessage.StartsWith("renew license '")) { action = "갱신"; targetId = ExtractId(commitMessage, "renew license '"); }
+            else if (commitMessage.StartsWith("remove")) { action = "삭제"; targetId = TrimMsg(commitMessage); }
+            else if (commitMessage.StartsWith("revoke license '")) { action = "폐기"; targetId = ExtractId(commitMessage, "revoke license '"); }
+            else if (commitMessage.StartsWith("restore license '")) { action = "복원"; targetId = ExtractId(commitMessage, "restore license '"); }
+            else if (commitMessage.StartsWith("extend")) { action = "연장"; targetId = TrimMsg(commitMessage); }
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(JsonPath));
@@ -1539,6 +2103,7 @@ namespace KJ_FlowForge_CreateKey
                 int staged = RunGitCapture(repoDir, "diff --cached --quiet");
                 if (staged == 0)
                 {
+                    AppendHistory(action, targetId, "변경사항 없음(이미 반영됨)", "성공");
                     MessageBox.Show("변경사항이 없어 커밋하지 않았습니다.", "정보",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return true;
@@ -1549,14 +2114,18 @@ namespace KJ_FlowForge_CreateKey
 
                 if (pushExit != 0)
                 {
+                    AppendHistory(action, targetId, "로컬 커밋 완료, 푸시 실패", "푸시 필요");
                     MessageBox.Show("Git push 실패. 커밋은 로컬에 남아 있습니다.\n\n=== Git 출력 ===\n" + gitLog.ToString(),
                         "푸시 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return false;
                 }
+                AppendHistory(action, targetId, "커밋 & 푸시 완료", "성공");
+                UpdateGitStatusLabel();
                 return true;
             }
             catch (Exception ex)
             {
+                AppendHistory(action, targetId, "오류: " + ex.Message, "실패");
                 MessageBox.Show("오류: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
