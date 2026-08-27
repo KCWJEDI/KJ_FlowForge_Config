@@ -41,7 +41,7 @@ namespace KJ_FlowForge_CreateKey
         private Button refreshButton, deleteButton, revokeButton, restoreButton;
         private Button copyKeyButton2;
         private TextBox searchBox;
-        private CheckBox filterExpiringCheck, filterRevokedCheck, filterAdminCheck, filterUserCheck;
+        // (필터 체크박스 제거됨 — 대시보드/검색 필터로 대체)
         private int sortColumnIndex = -1;   // -1 = 기본(등록) 순서
         private int sortState = 0;          // 0=기본, 1=오름차순, 2=내림차순
         private Button renewButton, copyDetailButton;
@@ -398,11 +398,21 @@ namespace KJ_FlowForge_CreateKey
             };
             gitStatusLabel.Click += (s, e) => { gitStatusLabel.Text = "Git: 확인 중..."; UpdateGitStatusLabel(); };
 
+            // 필터 설정 소제목
+            var filterTitle = new Label
+            {
+                Text = "필터 설정",
+                Location = new Point(S(12), S(40)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+
             // 클릭 가능한 대시보드 요약 (전체 / 유효 / 관리자 / 유저 / 임박 / 만료 / 폐기)
             dashboardPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(44)),
-                Size = new Size(S(720), S(42)),
+                Location = new Point(S(12), S(62)),
+                Size = new Size(S(720), S(34)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
@@ -410,9 +420,19 @@ namespace KJ_FlowForge_CreateKey
             };
             BuildDashboardLinks();
 
+            // 키 설정 도구 소제목
+            var toolsTitle = new Label
+            {
+                Text = "키 설정 도구",
+                Location = new Point(S(12), S(100)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+
             var topPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(92)),
+                Location = new Point(S(12), S(122)),
                 Size = new Size(S(720), S(42)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
@@ -440,38 +460,31 @@ namespace KJ_FlowForge_CreateKey
             topPanel.Controls.AddRange(new Control[] { refreshButton, deleteButton, revokeButton, restoreButton,
                 copyKeyButton2, renewButton, copyDetailButton, verifyButton, pushRetryButton });
 
+            // 검색 필터 소제목
+            var searchTitle = new Label
+            {
+                Text = "검색 필터",
+                Location = new Point(S(12), S(166)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+
             // 검색 + 필터 행
             var filterPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(140)),
+                Location = new Point(S(12), S(188)),
                 Size = new Size(S(720), S(40)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             searchBox = new TextBox { Width = S(280) };
             searchBox.TextChanged += (s, e) => RenderList();
-            filterExpiringCheck = new CheckBox { Text = "만료 임박(7일)만", AutoSize = true };
-            filterExpiringCheck.CheckedChanged += (s, e) => RenderList();
-            filterRevokedCheck = new CheckBox { Text = "폐기된 것만", AutoSize = true };
-            filterRevokedCheck.CheckedChanged += (s, e) => RenderList();
-            filterAdminCheck = new CheckBox { Text = "관리자만", AutoSize = true };
-            filterUserCheck = new CheckBox { Text = "유저만", AutoSize = true };
-            // 관리자만/유저만은 동시에 선택 불가 (배타적 필터)
-            filterAdminCheck.CheckedChanged += (s, e) =>
-            {
-                if (filterAdminCheck.Checked) filterUserCheck.Checked = false;
-                RenderList();
-            };
-            filterUserCheck.CheckedChanged += (s, e) =>
-            {
-                if (filterUserCheck.Checked) filterAdminCheck.Checked = false;
-                RenderList();
-            };
-            filterPanel.Controls.AddRange(new Control[] { searchBox, filterExpiringCheck, filterRevokedCheck, filterAdminCheck, filterUserCheck });
+            filterPanel.Controls.Add(searchBox);
 
             // 일괄 연장 행
             var extendPanel = new FlowLayoutPanel
             {
-                Location = new Point(S(12), S(186)),
+                Location = new Point(S(12), S(232)),
                 Size = new Size(S(720), S(40)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
@@ -489,7 +502,7 @@ namespace KJ_FlowForge_CreateKey
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(S(12), S(232)),
+                Location = new Point(S(12), S(276)),
                 Size = new Size(S(720), S(328)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Font = new Font("Consolas", 17f),
@@ -517,17 +530,18 @@ namespace KJ_FlowForge_CreateKey
             var hintLabel = new Label
             {
                 Text = "※ 삭제/폐기/복원 시 자동으로 커밋 & 푸시됩니다.  |  키를 복사하려면 행 선택 후 [키 복사] 또는 행 더블클릭",
-                Location = new Point(S(12), S(566)),
+                Location = new Point(S(12), S(610)),
                 AutoSize = true,
                 ForeColor = Color.Gray,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             };
 
-            page.Controls.AddRange(new Control[] { gitStatusLabel, dashboardPanel, topPanel, filterPanel, licenseList, hintLabel });
+            page.Controls.AddRange(new Control[] { gitStatusLabel, filterTitle, dashboardPanel, toolsTitle, topPanel,
+                searchTitle, filterPanel, licenseList, hintLabel });
             return page;
         }
 
-        // 대시보드 링크 버튼 생성 (개수 표시 + 클릭 시 필터)
+        // 대시보드 링크 버튼 생성 (클릭 시 필터)
         private List<Button> dashboardButtons = new List<Button>();
         private void BuildDashboardLinks()
         {
@@ -537,9 +551,9 @@ namespace KJ_FlowForge_CreateKey
             {
                 var b = new Button
                 {
-                    Text = label + " 0",
-                    Width = S(96),
-                    Height = S(32),
+                    Text = label,
+                    Width = S(78),
+                    Height = S(26),
                     BackColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
                 };
@@ -559,45 +573,17 @@ namespace KJ_FlowForge_CreateKey
         private void RefreshDashboardCounts()
         {
             if (dashboardPanel == null || dashboardButtons.Count == 0) return;
-            DateTime now = DateTime.Today;
             string[] keys = { "전체", "유효", "관리자", "유저", "만료임박", "만료", "폐기" };
-            int[] counts = new int[keys.Length];
-            foreach (var en in entries)
-            {
-                counts[0]++; // 전체
-                bool isRevoked = revoked.Contains(en.Id);
-                DateTime expDt = DateTime.MinValue;
-                bool hasExp = en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt);
-                bool isExpired = hasExp && expDt < now;
-                bool isSoon = !isRevoked && !isExpired && hasExp && (expDt - now).TotalDays <= 7;
-                if (!isRevoked && !isExpired) counts[1]++; // 유효
-                if (en.Role == "admin") counts[2]++;      // 관리자
-                else counts[3]++;                        // 유저
-                if (isSoon) counts[4]++;                 // 만료임박
-                if (isExpired) counts[5]++;              // 만료
-                if (isRevoked) counts[6]++;              // 폐기
-            }
             for (int i = 0; i < dashboardButtons.Count && i < keys.Length; i++)
             {
-                dashboardButtons[i].Text = keys[i] + " " + counts[i];
                 dashboardButtons[i].BackColor = (dashboardFilter == keys[i]) ? Color.LightSteelBlue : Color.White;
             }
         }
 
         private void SyncFilterFromDashboard()
         {
-            // 대시보드 필터와 기존 체크박스/검색 연동
-            bool admin = dashboardFilter == "관리자";
-            bool user = dashboardFilter == "유저";
-            bool expiring = dashboardFilter == "만료임박";
-            bool revokedOnly = dashboardFilter == "폐기";
-            bool expiredOnly = dashboardFilter == "만료";
-            // 기존 체크박스와 일치시키되, "만료"/"유효"/"전체" 등은 체크박스가 없으므로
-            // 검색/체크박스는 그대로 두고 RenderList의 dashboardFilter를 활용.
-            filterAdminCheck.Checked = admin;
-            filterUserCheck.Checked = user;
-            filterExpiringCheck.Checked = expiring;
-            filterRevokedCheck.Checked = revokedOnly;
+            // 대시보드 필터는 RenderList가 dashboardFilter만으로 판단하며,
+            // 기존 체크박스는 제거되었으므로 별도 연동이 필요 없음.
         }
 
         private void OnListSelectionChanged(object sender, EventArgs e)
@@ -795,17 +781,7 @@ namespace KJ_FlowForge_CreateKey
                         || en.KeyPlain.ToLowerInvariant().Contains(query);
                     if (!hit) continue;
                 }
-                // 만료 임박 필터: 유효하고 D-7 이내인 키만
-                if (filterExpiringCheck != null && filterExpiringCheck.Checked)
-                {
-                    if (isRevoked || daysLeft == int.MinValue || daysLeft < 0 || daysLeft > 7) continue;
-                }
-                // 폐기 필터: 폐기된 키만
-                if (filterRevokedCheck != null && filterRevokedCheck.Checked && !isRevoked) continue;
                 // 관리자 필터: role이 admin인 키만
-                if (filterAdminCheck != null && filterAdminCheck.Checked && en.Role != "admin") continue;
-                // 유저 필터: role이 admin이 아닌 키만 (role 없는 기존 키 포함)
-                if (filterUserCheck != null && filterUserCheck.Checked && en.Role == "admin") continue;
 
                 if (isRevoked) { status = "폐기됨"; color = Color.DarkRed; }
                 else if (en.ExpiresAt.Length > 0 && DateTime.TryParse(en.ExpiresAt, out expDt))
@@ -1293,6 +1269,9 @@ namespace KJ_FlowForge_CreateKey
         {
             renewTarget = null;
             idBox.ReadOnly = false;
+            // 갱신 취소 시 텍스트박스에 채워진 키 ID/사용자 이름만 비운다
+            idBox.Text = "";
+            ownerBox.Text = "";
             generateButton.Text = "키 생성 & 저장소 반영";
             adminCheck.Checked = false;
             expiryDateCheck.Checked = true;
