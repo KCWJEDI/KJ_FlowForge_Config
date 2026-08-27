@@ -402,6 +402,15 @@ namespace KJ_FlowForge_CreateKey
             licenseList.Columns.Add("발급 키", 430);
             licenseList.SelectedIndexChanged += OnListSelectionChanged;
             licenseList.DoubleClick += (s, e) => CopySelectedKeys();
+            licenseList.KeyDown += (s, e) =>
+            {
+                if (e.Control && e.KeyCode == Keys.C)
+                {
+                    CopySelectedKeys();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
+            };
             licenseList.ColumnClick += OnColumnSortClick;
 
             var hintLabel = new Label
