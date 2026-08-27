@@ -246,16 +246,16 @@ namespace KJ_FlowForge_CreateKey
         {
             Text = "KJ FlowForge - 라이선스 관리";
             Font = new Font("맑은 고딕", 15f);
-            Size = new Size(1380, 1010);
-            MinimumSize = new Size(1200, 900);
+            Size = new Size(1660, 1010);
+            MinimumSize = new Size(1500, 900);
             StartPosition = FormStartPosition.CenterScreen;
             TryLoadZoom();
             if (Math.Abs(uiZoom - DesignScale) > 0.01f)
             {
                 float rf = uiZoom / DesignScale;
                 Font = new Font("맑은 고딕", 15f * rf);
-                Size = new Size((int)Math.Round(1380 * rf), (int)Math.Round(1010 * rf));
-                MinimumSize = new Size((int)Math.Round(1200 * rf), (int)Math.Round(900 * rf));
+                Size = new Size((int)Math.Round(1660 * rf), (int)Math.Round(1010 * rf));
+                MinimumSize = new Size((int)Math.Round(1500 * rf), (int)Math.Round(900 * rf));
                 baseClientSize = ClientSize;
                 baseMinimumSize = MinimumSize;
             }
