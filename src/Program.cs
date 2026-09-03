@@ -593,8 +593,13 @@ namespace KJ_FlowForge_CreateKey
                 var gitLog = new StringBuilder();
                 RunGitCapture(repoDir, "commit -m \"chore: update projects.json\"", gitLog);
                 RunGit(repoDir, "fetch origin main");
-                RunGit(repoDir, "reset --soft origin/main");
+
                 int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
+                if (pushExit != 0)
+                {
+                    RunGitCapture(repoDir, "pull --rebase origin main", gitLog);
+                    pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
+                }
                 if (pushExit != 0)
                 {
                     AppendHistory("변경", "projects.json", "로컬 커밋 완료, 푸시 실패", "푸시 필요");
