@@ -20,10 +20,22 @@ namespace KJ_FlowForge_CreateKey
         public string KeyPlain = "";   // 로컬 전용 (keys.local.json)
     }
 
+    public class ProjectEntry
+    {
+        public string Id = "";
+        public string Name = "";
+        public string Url = "";
+        public List<string> AllowedBranches = new List<string>();   // 비어 있으면 전체 브랜치 허용
+        public string NotionDatabaseId = "";
+        public string DiscordChannelId = "";
+        public Dictionary<string, List<string>> UserBranches = new Dictionary<string, List<string>>();   // keyId → 허용 브랜치
+    }
+
     public class MainForm : Form
     {
         private static readonly string ExeDir = AppDomain.CurrentDomain.BaseDirectory;
         private static readonly string JsonPath = Path.Combine(ExeDir, "licenses.json");
+        private static readonly string ProjectsPath = Path.Combine(ExeDir, "projects.json");
         private static readonly string LocalKeysPath = Path.Combine(ExeDir, "keys.local.json");
         private static readonly string SettingsPath = Path.Combine(ExeDir, "ui.settings.json");
         private static readonly string HistoryPath = Path.Combine(ExeDir, "operation.history.json");
@@ -70,6 +82,17 @@ namespace KJ_FlowForge_CreateKey
         private List<LicenseEntry> entries = new List<LicenseEntry>();
         private List<string> revoked = new List<string>();
 
+        // ===== 프로젝트 관리 탭 =====
+        private List<ProjectEntry> projects = new List<ProjectEntry>();
+        private ListView projectList;
+        private ComboBox projectUserBox;
+        private System.Windows.Forms.FlowLayoutPanel projectBranchPanel;
+        private Button projectRefreshBranchesButton;
+        private Button projectSaveButton;
+        private Label projectUserNameLabel;
+        private Label projectPushStatusLabel;
+        private List<string> currentRemoteBranches = new List<string>();
+
         // ===== 작업 이력(감사) 로컬 전용 =====
         private List<Dictionary<string, object>> historyItems = new List<Dictionary<string, object>>();
 
@@ -80,135 +103,7 @@ namespace KJ_FlowForge_CreateKey
         private Timer clipboardClearTimer;
         private int clipboardGuardSeconds = 60;
 
-        // ===== Ctrl+마우스휠 UI 배율 조절 =====
-        private float uiZoom = 1.8f;
-        private const float DesignScale = 1.8f;   // 최초 디자인 배율
-        private const float ZoomStep = 0.1f;
-        private const float ZoomMin = 1.0f;
-        private const float ZoomMax = 3.0f;
-        private readonly Dictionary<Control, ZoomInfo> zoomInfoMap = new Dictionary<Control, ZoomInfo>();
-        private Size baseClientSize;
-        private Size baseMinimumSize;
-        private string tabsBaseFontFamily = "";
-        private float tabsBaseFontSize;
-        private FontStyle tabsBaseFontStyle;
 
-        private class ZoomInfo
-        {
-            public Rectangle Bounds;
-            public bool HasOwnFont;
-            public string FontFamily = "";
-            public float FontSize;
-            public FontStyle FontStyle;
-            public int[] ColumnWidths;
-        }
-
-        private class CtrlWheelFilter : IMessageFilter
-        {
-            private readonly MainForm owner;
-            public CtrlWheelFilter(MainForm owner) { this.owner = owner; }
-            public bool PreFilterMessage(ref Message m)
-            {
-                // WM_MOUSEWHEEL (0x20A) + Ctrl 키 → 줌 처리 후 이벤트 소비
-                if (m.Msg == 0x20A && (Control.ModifierKeys & Keys.Control) == Keys.Control)
-                {
-                    int delta = (short)((long)m.WParam >> 16);
-                    owner.ApplyZoom(delta > 0 ? ZoomStep : -ZoomStep);
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        // 최초 표시 시점의 컨트롤 위치/폰트를 기준으로 저장
-        private void CaptureZoomBase()
-        {
-            zoomInfoMap.Clear();
-            CollectZoomInfo(tabs);
-        }
-
-        private void CollectZoomInfo(Control root)
-        {
-            foreach (Control c in root.Controls)
-            {
-                var info = new ZoomInfo
-                {
-                    Bounds = c.Bounds,
-                    HasOwnFont = true,
-                    FontFamily = c.Font.FontFamily.Name,
-                    FontSize = c.Font.Size,
-                    FontStyle = c.Font.Style,
-                };
-                var listView = c as ListView;
-                if (listView != null)
-                {
-                    info.ColumnWidths = new int[listView.Columns.Count];
-                    for (int i = 0; i < listView.Columns.Count; i++)
-                        info.ColumnWidths[i] = listView.Columns[i].Width;
-                }
-                zoomInfoMap[c] = info;
-                if (c.Controls.Count > 0) CollectZoomInfo(c);
-            }
-        }
-
-        private void ApplyZoom(float delta)
-        {
-            if (zoomInfoMap.Count == 0) return;
-            float newZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, uiZoom + delta));
-            if (Math.Abs(newZoom - uiZoom) < 0.001f) return;
-            uiZoom = newZoom;
-            float factor = uiZoom / DesignScale;
-
-            SuspendAllLayout(this);
-            // 탭 컨트롤 자체 폰트(머리글 "발급 현황"/"키 발급" 포함)
-            try { tabs.Font = new Font(tabsBaseFontFamily, tabsBaseFontSize * factor, tabsBaseFontStyle); } catch { }
-            // 폰트 먼저 변경(라벨 AutoSize 재계산), 이후 위치 복원
-            foreach (var pair in zoomInfoMap)
-            {
-                var c = pair.Key;
-                var info = pair.Value;
-                try { c.Font = new Font(info.FontFamily, info.FontSize * factor, info.FontStyle); } catch { }
-            }
-            foreach (var pair in zoomInfoMap)
-            {
-                var c = pair.Key;
-                var b = pair.Value.Bounds;
-                c.Bounds = new Rectangle(
-                    (int)Math.Round(b.X * factor),
-                    (int)Math.Round(b.Y * factor),
-                    (int)Math.Round(b.Width * factor),
-                    (int)Math.Round(b.Height * factor));
-            }
-            ClientSize = new Size(
-                (int)Math.Round(baseClientSize.Width * factor),
-                (int)Math.Round(baseClientSize.Height * factor));
-            MinimumSize = new Size(
-                (int)Math.Round(baseMinimumSize.Width * factor),
-                (int)Math.Round(baseMinimumSize.Height * factor));
-
-            var lv = licenseList;
-            if (zoomInfoMap.ContainsKey(lv))
-            {
-                var widths = zoomInfoMap[lv].ColumnWidths;
-                for (int i = 0; i < widths.Length && i < lv.Columns.Count; i++)
-                    lv.Columns[i].Width = (int)Math.Round(widths[i] * factor);
-            }
-            ResumeAllLayout(this);
-            AutoFitAllColumns();
-            SaveUiSettings();
-        }
-
-        private void SuspendAllLayout(Control root)
-        {
-            root.SuspendLayout();
-            foreach (Control c in root.Controls) SuspendAllLayout(c);
-        }
-
-        private void ResumeAllLayout(Control root)
-        {
-            foreach (Control c in root.Controls) ResumeAllLayout(c);
-            root.ResumeLayout(true);
-        }
 
         // 발급 현황 모든 열을 내용 길이에 맞게 자동 확장
         private void AutoFitAllColumns()
@@ -249,43 +144,495 @@ namespace KJ_FlowForge_CreateKey
             Size = new Size(1660, 1010);
             MinimumSize = new Size(1500, 900);
             StartPosition = FormStartPosition.CenterScreen;
-            TryLoadZoom();
-            if (Math.Abs(uiZoom - DesignScale) > 0.01f)
-            {
-                float rf = uiZoom / DesignScale;
-                Font = new Font("맑은 고딕", 15f * rf);
-                Size = new Size((int)Math.Round(1660 * rf), (int)Math.Round(1010 * rf));
-                MinimumSize = new Size((int)Math.Round(1500 * rf), (int)Math.Round(900 * rf));
-                baseClientSize = ClientSize;
-                baseMinimumSize = MinimumSize;
-            }
-            else
-            {
-            baseClientSize = ClientSize;
-            baseMinimumSize = MinimumSize;
-            }
 
             tabs = new TabControl { Dock = DockStyle.Fill };
             var issueTab = BuildIssueTab();
             var listTab = BuildListTab();
             var historyTab = BuildHistoryTab();
+            var projectTab = BuildProjectTab();
             tabs.TabPages.Add(listTab);
             tabs.TabPages.Add(issueTab);
+            tabs.TabPages.Add(projectTab);
             tabs.TabPages.Add(historyTab);
 
             Controls.Add(tabs);
-            tabsBaseFontFamily = tabs.Font.FontFamily.Name;
-            tabsBaseFontSize = tabs.Font.Size;
-            tabsBaseFontStyle = tabs.Font.Style;
-            // Ctrl+휠 줌 필터 등록
-            var wheelFilter = new CtrlWheelFilter(this);
-            Application.AddMessageFilter(wheelFilter);
-            FormClosed += (s, e) => Application.RemoveMessageFilter(wheelFilter);
-            Shown += (s, e) => CaptureZoomBase();
             FormClosing += (s, e) => SaveUiSettings();
             Resize += (s, e) => AutoFitAllColumns();
-            Load += (s, e) => { LoadHistory(); Reload(); UpdateGitStatusLabel(); };
+            Load += (s, e) => { LoadHistory(); Reload(); TryPullProjects(); ReloadProjects(); UpdateGitStatusLabel(); };
             Shown += (s, e) => { BackupLocalKeys(); ShowExpiryAlert(); };
+        }
+        // ==================== 프로젝트 관리 탭 ====================
+
+        private TabPage BuildProjectTab()
+        {
+            var page = new TabPage("프로젝트 관리");
+
+            var title = new Label
+            {
+                Text = "유저별 브랜치 설정 (KJ_FlowForge_Config/projects.json)",
+                Location = new Point(S(12), S(12)),
+                AutoSize = true,
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
+            };
+
+
+            var info = new Label
+            {
+                Text = "좌측에서 저장소를 선택하고, 유저(키 ID)를 고른 뒤 해당 유저의 허용 브랜치를 체크하세요. 저장 시 projects.json에 반영·푸시됩니다. 프로젝트 정의(깃 주소 등)는 허브 관리자가 등록한 항목입니다.",
+                Location = new Point(S(12), S(44)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+
+            projectList = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                HideSelection = false,
+                Location = new Point(S(12), S(80)),
+                Size = new Size(S(560), S(420)),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left,
+                Font = new Font("맑은 고딕", 14f),
+            };
+            projectList.Columns.Add("ID", 110);
+            projectList.Columns.Add("이름", 130);
+            projectList.Columns.Add("깃 주소", 280);
+            projectList.SelectedIndexChanged += (s, e) => LoadSelectedProject();
+
+            var labelUser = new Label { Text = "유저 선택 (키 ID)", Location = new Point(S(590), S(80)), AutoSize = true };
+            projectUserBox = new ComboBox
+            {
+                Location = new Point(S(590), S(103)),
+                Width = S(420),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("맑은 고딕", 14f),
+            };
+            projectUserBox.SelectedIndexChanged += (s, e) => RenderProjectBranchesForSelectedUser();
+
+            projectUserNameLabel = new Label
+            {
+                Text = "",
+                Location = new Point(S(590), S(140)),
+                Size = new Size(S(420), S(24)),
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+
+            var labelBranch = new Label
+            {
+                Text = "이 유저의 허용 브랜치 (체크된 브랜치만 사용 가능, 미선택 시 전체 허용)",
+                Location = new Point(S(590), S(180)),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("맑은 고딕", 14f),
+            };
+            projectRefreshBranchesButton = new Button { Text = "브랜치 불러오기", Location = new Point(S(590), S(205)), Width = S(150), Height = S(32) };
+            projectRefreshBranchesButton.Click += async (s, e) => await RefreshProjectBranches();
+
+            projectBranchPanel = new FlowLayoutPanel
+            {
+                Location = new Point(S(590), S(245)),
+                Size = new Size(S(460), S(200)),
+                AutoScroll = true,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+            };
+
+            // 저장 버튼은 하단 패널에 고정 배치 (Dock 방식으로 항상 보이도록)
+            projectSaveButton = new Button
+            {
+                Text = "변경 저장 & 푸시",
+                Width = S(250),
+                Height = S(44),
+                Dock = DockStyle.Right,
+                BackColor = Color.FromArgb(46, 139, 87),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                FlatAppearance = { BorderSize = 0 },
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
+            };
+            projectSaveButton.Click += async (s, e) => await SaveProjectsAndPush();
+
+            // 하단 패널: 우측에 [결과 캡션 + 저장 버튼] 세로 스택 배치
+            projectPushStatusLabel = new Label
+            {
+                Text = "",
+                Size = new Size(S(250), S(26)),
+                Location = new Point(0, S(2)),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.DimGray,
+            };
+            var bottomPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = S(86),
+                BackColor = Color.White,
+            };
+            var bottomRightStack = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = S(250),
+                Height = S(86),
+                BackColor = Color.White,
+            };
+            projectSaveButton.Dock = DockStyle.Bottom;
+            bottomRightStack.Controls.Add(projectSaveButton);
+            bottomRightStack.Controls.Add(projectPushStatusLabel);
+            bottomPanel.Controls.Add(bottomRightStack);
+
+            page.Controls.AddRange(new Control[] { title, info, projectList,
+                labelUser, projectUserBox, projectUserNameLabel,
+                labelBranch, projectRefreshBranchesButton, projectBranchPanel, bottomPanel });
+            bottomPanel.BringToFront();
+
+            return page;
+        }
+
+        /// <summary>
+        /// 허브(관리자)가 Config 저장소에 push한 projects.json 변경을 로컬 checkout에 반영합니다.
+        /// 실패해도 무시하고 기존 로컬 파일로 계속합니다.
+        /// </summary>
+        private void TryPullProjects()
+        {
+            try
+            {
+                string repoDir = Path.GetDirectoryName(ProjectsPath);
+                if (string.IsNullOrEmpty(repoDir) || !Directory.Exists(repoDir)) return;
+                // 허브(관리자)가 GitHub API로 push한 최신 projects.json만 origin/main에서 가져옵니다.
+                // reset/clean과 같은 파괴적 작업은 하지 않아 다른 파일(소스, exe, 키)은 보존합니다.
+                int fetchExit = RunGitCapture(repoDir, "fetch origin main", null);
+                if (fetchExit != 0) return;
+                var sb = new StringBuilder();
+                int showExit = RunGitCapture(repoDir, "show origin/main:projects.json", sb);
+                if (showExit == 0 && sb.Length > 0)
+                {
+                    string remote = sb.ToString().Trim();
+                    if (remote.StartsWith("{") && remote.Contains("projects"))
+                    {
+                        File.WriteAllText(ProjectsPath, remote + Environment.NewLine, Encoding.UTF8);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void ReloadProjects()
+        {
+            projects.Clear();
+            try
+            {
+                if (!File.Exists(ProjectsPath)) return;
+                string raw = File.ReadAllText(ProjectsPath);
+                int pos = 0;
+                SkipWs(raw, ref pos);
+                var node = ParseObject(raw, ref pos);
+                if (!(node.ContainsKey("projects") && node["projects"] is List<object>)) return;
+                foreach (var item in (List<object>)node["projects"])
+                {
+                    var obj = (Dictionary<string, object>)item;
+                    var entry = new ProjectEntry
+                    {
+                        Id = Str(obj, "id"),
+                        Name = Str(obj, "name"),
+                        Url = Str(obj, "url"),
+                        NotionDatabaseId = Str(obj, "notionDatabaseId"),
+                        DiscordChannelId = Str(obj, "discordChannelId"),
+                    };
+                    if (obj.ContainsKey("allowedBranches") && obj["allowedBranches"] is List<object>)
+                    {
+                        foreach (var b in (List<object>)obj["allowedBranches"])
+                            if (b != null && b.ToString().Trim().Length > 0) entry.AllowedBranches.Add(b.ToString());
+                    }
+                    if (obj.ContainsKey("userBranches") && obj["userBranches"] is Dictionary<string, object>)
+                    {
+                        foreach (var kv in (Dictionary<string, object>)obj["userBranches"])
+                        {
+                            if (kv.Value is List<object>)
+                            {
+                                var list = new List<string>();
+                                foreach (var b in (List<object>)kv.Value)
+                                    if (b != null && b.ToString().Trim().Length > 0) list.Add(b.ToString());
+                                if (list.Count > 0) entry.UserBranches[kv.Key] = list;
+                            }
+                        }
+                    }
+                    if (entry.Id.Length > 0 && entry.Url.Length > 0) projects.Add(entry);
+                }
+            }
+            catch { }
+            RenderProjects();
+        }
+
+        private void RenderProjects()
+        {
+            if (projectList == null) return;
+            projectList.Items.Clear();
+            PopulateUserCombo();
+            for (int i = 0; i < projects.Count; i++)
+            {
+                var en = projects[i];
+                var item = new ListViewItem(en.Id);
+                item.SubItems.Add(en.Name);
+                item.SubItems.Add(en.Url);
+                projectList.Items.Add(item);
+            }
+        }
+
+        private string GetSelectedProjectUrl()
+        {
+            if (projectList == null || projectList.SelectedItems.Count == 0 || projectList.SelectedIndices[0] >= projects.Count) return "";
+            return projects[projectList.SelectedIndices[0]].Url;
+        }
+
+        private ProjectEntry GetSelectedProject()
+        {
+            if (projectList == null || projectList.SelectedItems.Count == 0) return null;
+            int idx = projectList.SelectedIndices[0];
+            if (idx < 0 || idx >= projects.Count) return null;
+            return projects[idx];
+        }
+
+        private void PopulateUserCombo()
+        {
+            if (projectUserBox == null) return;
+            string current = projectUserBox.SelectedItem as string;
+            projectUserBox.Items.Clear();
+            foreach (var en in entries)
+            {
+                if (en.Role == "admin") continue;   // 관리자는 제한 대상 아님
+                string label = en.Id;
+                if (en.Owner.Length > 0) label = en.Id + " (" + en.Owner + ")";
+                projectUserBox.Items.Add(label);
+            }
+            if (current != null && projectUserBox.Items.Contains(current)) projectUserBox.SelectedItem = current;
+            else if (projectUserBox.Items.Count > 0) projectUserBox.SelectedIndex = 0;
+        }
+
+        private string SelectedUserKeyId()
+        {
+            string sel = projectUserBox == null ? null : projectUserBox.SelectedItem as string;
+            if (sel == null) return "";
+            int sp = sel.IndexOf(' ');
+            return sp >= 0 ? sel.Substring(0, sp) : sel;
+        }
+
+        private void LoadSelectedProject()
+        {
+            if (projectList == null || projectList.SelectedItems.Count == 0) return;
+            int idx = projectList.SelectedIndices[0];
+            if (idx < 0 || idx >= projects.Count) return;
+            var en = projects[idx];
+            PopulateUserCombo();
+            projectUserNameLabel.Text = "저장소: " + en.Name + " (" + en.Id + ")";
+            RenderProjectBranchesForSelectedUser();
+        }
+
+        private void RenderProjectBranchesForSelectedUser()
+        {
+            var en = GetSelectedProject();
+            if (en == null || projectUserBox == null) return;
+            string keyId = SelectedUserKeyId();
+            List<string> checkedBranches = new List<string>();
+            if (keyId.Length > 0 && en.UserBranches.ContainsKey(keyId)) checkedBranches = en.UserBranches[keyId];
+            RenderProjectBranches(checkedBranches);
+        }
+
+        private void RenderProjectBranches(List<string> checkedBranches)
+        {
+            if (projectBranchPanel == null) return;
+            projectBranchPanel.Controls.Clear();
+            foreach (var branch in currentRemoteBranches)
+            {
+                var cb = new CheckBox
+                {
+                    Text = branch,
+                    AutoSize = true,
+                    Checked = checkedBranches != null && checkedBranches.Contains(branch),
+                };
+                projectBranchPanel.Controls.Add(cb);
+            }
+        }
+
+        private async System.Threading.Tasks.Task RefreshProjectBranches()
+        {
+            string url = GetSelectedProjectUrl();
+            if (url.Length == 0)
+            {
+                MessageBox.Show("좌측 목록에서 저장소를 먼저 선택하세요.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                projectRefreshBranchesButton.Enabled = false;
+                var sb = new StringBuilder();
+                RunGitCapture(ExeDir, "ls-remote --heads \"" + url.Replace("\"", "") + "\"", sb);
+                var branches = new List<string>();
+                foreach (var line in sb.ToString().Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int tab = line.IndexOf('\t');
+                    string refName = tab >= 0 ? line.Substring(tab + 1) : line;
+                    refName = refName.Trim();
+                    if (refName.StartsWith("refs/heads/")) branches.Add(refName.Substring("refs/heads/".Length));
+                }
+                currentRemoteBranches = branches;
+                RenderProjectBranchesForSelectedUser();
+                projectRefreshBranchesButton.Text = "브랜치 불러오기 (" + branches.Count + ")";
+                if (branches.Count == 0)
+                    MessageBox.Show("원격 브랜치를 가져오지 못했습니다.\n\n" + sb.ToString(), "브랜치 없음", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("브랜치 조회 실패: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                projectRefreshBranchesButton.Enabled = true;
+            }
+        }
+
+        private List<string> GetCheckedBranches()
+        {
+            var result = new List<string>();
+            if (projectBranchPanel == null) return result;
+            foreach (CheckBox cb in projectBranchPanel.Controls)
+                if (cb.Checked) result.Add(cb.Text);
+            return result;
+        }
+
+        private string SerializeProjects(List<ProjectEntry> all)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine("  \"version\": 1,");
+            sb.AppendLine("  \"projects\": [");
+            for (int i = 0; i < all.Count; i++)
+            {
+                var en = all[i];
+                var fields = new List<string>
+                {
+                    "\"id\": \"" + Escape(en.Id) + "\"",
+                    "\"name\": \"" + Escape(en.Name) + "\"",
+                    "\"url\": \"" + Escape(en.Url) + "\"",
+                };
+                if (en.AllowedBranches != null && en.AllowedBranches.Count > 0)
+                {
+                    var arr = string.Join(", ", en.AllowedBranches.Select(b => "\"" + Escape(b) + "\"").ToArray());
+                    fields.Add("\"allowedBranches\": [" + arr + "]");
+                }
+                if (en.NotionDatabaseId.Length > 0) fields.Add("\"notionDatabaseId\": \"" + Escape(en.NotionDatabaseId) + "\"");
+                if (en.DiscordChannelId.Length > 0) fields.Add("\"discordChannelId\": \"" + Escape(en.DiscordChannelId) + "\"");
+                if (en.UserBranches != null && en.UserBranches.Count > 0)
+                {
+                    var parts = new List<string>();
+                    foreach (var kv in en.UserBranches)
+                    {
+                        var arr2 = string.Join(", ", kv.Value.Select(b => "\"" + Escape(b) + "\"").ToArray());
+                        parts.Add("\"" + Escape(kv.Key) + "\": [" + arr2 + "]");
+                    }
+                    fields.Add("\"userBranches\": { " + string.Join(", ", parts) + " }");
+                }
+                sb.Append("    { ");
+                sb.Append(string.Join(", ", fields));
+                sb.AppendLine(i < all.Count - 1 ? " }," : " }");
+            }
+            sb.AppendLine("  ]");
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private async System.Threading.Tasks.Task<bool> SaveProjectsAndPush()
+        {
+            try
+            {
+                SetProjectPushStatus("처리 중...", Color.DimGray);
+                // 현재 선택된 저장소/유저의 체크 브랜치를 프로젝트 정의에 반영
+                var selectedProject = GetSelectedProject();
+                if (selectedProject != null && projectUserBox != null)
+                {
+                    string keyId = SelectedUserKeyId();
+                    if (keyId.Length > 0)
+                    {
+                        var checkedBranches = GetCheckedBranches();
+                        if (checkedBranches.Count > 0) selectedProject.UserBranches[keyId] = checkedBranches;
+                        else selectedProject.UserBranches.Remove(keyId);
+                    }
+                }
+                var hashes = new HashSet<string>();
+                foreach (var en in projects)
+                {
+                    if (en.Id.Length == 0 || en.Url.Length == 0)
+                    {
+                        MessageBox.Show("프로젝트 ID와 깃 주소가 비어 있는 항목이 있습니다.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        SetProjectPushStatus("완료 실패", Color.Red);
+                        return false;
+                    }
+                    if (!hashes.Add(en.Id))
+                    {
+                        MessageBox.Show("중복된 프로젝트 ID가 있습니다: " + en.Id, "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        SetProjectPushStatus("완료 실패", Color.Red);
+                        return false;
+                    }
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(ProjectsPath));
+                File.WriteAllText(ProjectsPath, SerializeProjects(projects) + "\n", Encoding.UTF8);
+
+                string repoDir = Path.GetDirectoryName(ProjectsPath);
+                RunGit(repoDir, "add projects.json");
+                int staged = RunGitCapture(repoDir, "diff --cached --quiet");
+                if (staged == 0)
+                {
+                    AppendHistory("변경", "projects.json", "변경사항 없음(이미 반영됨)", "성공");
+                    MessageBox.Show("변경사항이 없어 커밋하지 않았습니다.", "정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    SetProjectPushStatus("완료됨", Color.Green);
+                    return true;
+                }
+                var gitLog = new StringBuilder();
+                RunGitCapture(repoDir, "commit -m \"chore: update projects.json\"", gitLog);
+                RunGit(repoDir, "fetch origin main");
+                RunGit(repoDir, "reset --soft origin/main");
+                int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
+                if (pushExit != 0)
+                {
+                    AppendHistory("변경", "projects.json", "로컬 커밋 완료, 푸시 실패", "푸시 필요");
+                    MessageBox.Show("Git push 실패. 커밋은 로컬에 남아 있습니다.\n\n=== Git 출력 ===\n" + gitLog.ToString(),
+                        "푸시 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    SetProjectPushStatus("완료 실패", Color.Red);
+                    return false;
+                }
+                AppendHistory("변경", "projects.json", "커밋 & 푸시 완료", "성공");
+                UpdateGitStatusLabel();
+                SetProjectPushStatus("완료됨", Color.Green);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppendHistory("변경", "projects.json", "오류: " + ex.Message, "실패");
+                MessageBox.Show("오류: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                SetProjectPushStatus("완료 실패", Color.Red);
+                return false;
+            }
+        }
+
+        private void SetProjectPushStatus(string msg, Color color)
+        {
+            if (projectPushStatusLabel == null) return;
+            if (InvokeRequired)
+            {
+                Invoke((Action)(() =>
+                {
+                    projectPushStatusLabel.Text = msg;
+                    projectPushStatusLabel.ForeColor = color;
+                }));
+            }
+            else
+            {
+                projectPushStatusLabel.Text = msg;
+                projectPushStatusLabel.ForeColor = color;
+            }
         }
 
         // ==================== 작업 이력 탭 ====================
@@ -345,7 +692,7 @@ namespace KJ_FlowForge_CreateKey
             return page;
         }
 
-        // ==================== 설정 저장/복원 (배율 기억) ====================
+        // ==================== 설정 저장 ====================
 
         private void SaveUiSettings()
         {
@@ -353,31 +700,9 @@ namespace KJ_FlowForge_CreateKey
             {
                 var sb = new StringBuilder();
                 sb.AppendLine("{");
-                sb.AppendLine("  \"zoom\": " + uiZoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                sb.AppendLine("{ \"ui\": \"1.0\" }");
                 sb.AppendLine("}");
                 File.WriteAllText(SettingsPath, sb.ToString(), Encoding.UTF8);
-            }
-            catch { }
-        }
-
-        private void TryLoadZoom()
-        {
-            try
-            {
-                if (!File.Exists(SettingsPath)) return;
-                string raw = File.ReadAllText(SettingsPath);
-                int i = raw.IndexOf("\"zoom\"");
-                if (i < 0) return;
-                int colon = raw.IndexOf(':', i);
-                int end = colon;
-                while (end < raw.Length && (char.IsDigit(raw[end]) || raw[end] == '.' || raw[end] == '-')) end++;
-                float z;
-                if (float.TryParse(raw.Substring(colon + 1, end - colon - 1).Trim(),
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out z))
-                {
-                    uiZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, z));
-                }
             }
             catch { }
         }
@@ -1372,6 +1697,9 @@ namespace KJ_FlowForge_CreateKey
             }
 
             int exit = RunGitCapture(repoDir, "push origin main", output);
+            RunGit(repoDir, "fetch origin main");
+                RunGit(repoDir, "reset --soft origin/main");
+            exit = RunGitCapture(repoDir, "push origin main", output);
             pushRetryButton.Enabled = true;
             pushRetryButton.Text = "푸시 재시도";
             if (exit == 0 && aheadCount > 0)
@@ -2089,6 +2417,8 @@ namespace KJ_FlowForge_CreateKey
                 }
                 var gitLog = new StringBuilder();
                 RunGitCapture(repoDir, "commit -m \"chore: " + commitMessage.Replace("\"", "") + "\"", gitLog);
+                RunGit(repoDir, "fetch origin main");
+                RunGit(repoDir, "reset --soft origin/main");
                 int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
 
                 if (pushExit != 0)
