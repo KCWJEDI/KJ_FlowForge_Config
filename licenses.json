@@ -2,7 +2,8 @@
   "version": 1,
   "keys": [
     { "id": "Admin", "hash": "65c4a26583c3b6566b7da9fb63a9a62f12fc49f3e9b18bf7f73c3462e5a2fac0", "owner": "KCWJEDI", "createdAt": "2026-08-26", "role": "admin" },
-    { "id": "User1", "hash": "016d78bb875cb16d80235bea8f6aadfb90e23cd6fa0e757f845f8995290879a4", "owner": "KCWUser1", "createdAt": "2026-09-02" }
+    { "id": "User1", "hash": "016d78bb875cb16d80235bea8f6aadfb90e23cd6fa0e757f845f8995290879a4", "owner": "KCWUser1", "createdAt": "2026-09-02" },
+    { "id": "YS", "hash": "b21a48d96fb003b5fdc6e59727869f22724c5cce65b06418a8b3d711a28f5ac7", "owner": "유석님", "expiresAt": "2026-10-12", "createdAt": "2026-09-06" }
   ],
   "revoked": ["kcwjeditestkey0167", "test1", "v23gf", "efef", "3f3ff33f", "Test1"]
 }
