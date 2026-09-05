@@ -2,6 +2,6 @@
   "version": 1,
   "projects": [
     { "id": "TestGithub", "name": "TestGitProject", "url": "https://github.com/KCWJEDI/KJ_FlowForge_TestGit.git", "notionDatabaseId": "3c67d5bc-cac5-80d3-8e2a-f8848f5f7abd", "discordChannelId": "1536922065423044630", "userBranches": { "User1": ["Test1"], "Test": ["Test1", "master"] } },
-    { "id": "CK_2_2_TermProject", "name": "CK_2_2_TermProject", "url": "https://github.com/KCWJEDI/CK_2_2_TermProject.git" }
+    { "id": "CK_2_2_TermProject", "name": "CK_2_2_TermProject", "url": "https://github.com/KCWJEDI/CK_2_2_TermProject.git", "userBranches": { "User1": ["Develop"] } }
   ]
 }
