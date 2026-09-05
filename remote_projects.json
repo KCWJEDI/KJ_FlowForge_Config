@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "TestGithub",
+      "name": "TestGitProject",
+      "url": "https://github.com/KCWJEDI/KJ_FlowForge_TestGit.git",
+      "notionDatabaseId": "3c67d5bc-cac5-80d3-8e2a-f8848f5f7abd",
+      "discordChannelId": "1536922065423044630"
+    },
+    {
+      "id": "DiceGambit",
+      "name": "프로그래머",
+      "url": "https://github.com/KCWJEDI/DiceGambit_Project.git",
+      "notionDatabaseId": "3c67d5bc-cac5-80d3-8e2a-f8848f5f7abd",
+      "discordChannelId": "1536922065423044630"
+    }
+  ]
+}

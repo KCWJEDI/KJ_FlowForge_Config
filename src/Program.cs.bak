@@ -89,10 +89,7 @@ namespace KJ_FlowForge_CreateKey
         private System.Windows.Forms.FlowLayoutPanel projectBranchPanel;
         private Button projectRefreshBranchesButton;
         private Button projectSaveButton;
-        private Button projectRefreshButton;
-        private Button projectCopyUrlButton;
         private Label projectUserNameLabel;
-        private Label projectPushStatusLabel;
         private List<string> currentRemoteBranches = new List<string>();
 
         // ===== 작업 이력(감사) 로컬 전용 =====
@@ -100,14 +97,140 @@ namespace KJ_FlowForge_CreateKey
 
         // ===== 대시보드 필터 상태 (클릭 시 목록에 반영) =====
         private string dashboardFilter = "";
-        private bool darkMode;
-        private Button lightModeButton, darkModeButton;
 
         // ===== 민감 클립보드 자동 삭제 (키 원문 보호) =====
         private Timer clipboardClearTimer;
         private int clipboardGuardSeconds = 60;
 
+        // ===== Ctrl+마우스휠 UI 배율 조절 =====
+        private float uiZoom = 1.8f;
+        private const float DesignScale = 1.8f;   // 최초 디자인 배율
+        private const float ZoomStep = 0.1f;
+        private const float ZoomMin = 1.0f;
+        private const float ZoomMax = 3.0f;
+        private readonly Dictionary<Control, ZoomInfo> zoomInfoMap = new Dictionary<Control, ZoomInfo>();
+        private Size baseClientSize;
+        private Size baseMinimumSize;
+        private string tabsBaseFontFamily = "";
+        private float tabsBaseFontSize;
+        private FontStyle tabsBaseFontStyle;
 
+        private class ZoomInfo
+        {
+            public Rectangle Bounds;
+            public bool HasOwnFont;
+            public string FontFamily = "";
+            public float FontSize;
+            public FontStyle FontStyle;
+            public int[] ColumnWidths;
+        }
+
+        private class CtrlWheelFilter : IMessageFilter
+        {
+            private readonly MainForm owner;
+            public CtrlWheelFilter(MainForm owner) { this.owner = owner; }
+            public bool PreFilterMessage(ref Message m)
+            {
+                // WM_MOUSEWHEEL (0x20A) + Ctrl 키 → 줌 처리 후 이벤트 소비
+                if (m.Msg == 0x20A && (Control.ModifierKeys & Keys.Control) == Keys.Control)
+                {
+                    int delta = (short)((long)m.WParam >> 16);
+                    owner.ApplyZoom(delta > 0 ? ZoomStep : -ZoomStep);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // 최초 표시 시점의 컨트롤 위치/폰트를 기준으로 저장
+        private void CaptureZoomBase()
+        {
+            zoomInfoMap.Clear();
+            CollectZoomInfo(tabs);
+        }
+
+        private void CollectZoomInfo(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                var info = new ZoomInfo
+                {
+                    Bounds = c.Bounds,
+                    HasOwnFont = true,
+                    FontFamily = c.Font.FontFamily.Name,
+                    FontSize = c.Font.Size,
+                    FontStyle = c.Font.Style,
+                };
+                var listView = c as ListView;
+                if (listView != null)
+                {
+                    info.ColumnWidths = new int[listView.Columns.Count];
+                    for (int i = 0; i < listView.Columns.Count; i++)
+                        info.ColumnWidths[i] = listView.Columns[i].Width;
+                }
+                zoomInfoMap[c] = info;
+                if (c.Controls.Count > 0) CollectZoomInfo(c);
+            }
+        }
+
+        private void ApplyZoom(float delta)
+        {
+            if (zoomInfoMap.Count == 0) return;
+            float newZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, uiZoom + delta));
+            if (Math.Abs(newZoom - uiZoom) < 0.001f) return;
+            uiZoom = newZoom;
+            float factor = uiZoom / DesignScale;
+
+            SuspendAllLayout(this);
+            // 탭 컨트롤 자체 폰트(머리글 "발급 현황"/"키 발급" 포함)
+            try { tabs.Font = new Font(tabsBaseFontFamily, tabsBaseFontSize * factor, tabsBaseFontStyle); } catch { }
+            // 폰트 먼저 변경(라벨 AutoSize 재계산), 이후 위치 복원
+            foreach (var pair in zoomInfoMap)
+            {
+                var c = pair.Key;
+                var info = pair.Value;
+                try { c.Font = new Font(info.FontFamily, info.FontSize * factor, info.FontStyle); } catch { }
+            }
+            foreach (var pair in zoomInfoMap)
+            {
+                var c = pair.Key;
+                var b = pair.Value.Bounds;
+                c.Bounds = new Rectangle(
+                    (int)Math.Round(b.X * factor),
+                    (int)Math.Round(b.Y * factor),
+                    (int)Math.Round(b.Width * factor),
+                    (int)Math.Round(b.Height * factor));
+            }
+            ClientSize = new Size(
+                (int)Math.Round(baseClientSize.Width * factor),
+                (int)Math.Round(baseClientSize.Height * factor));
+            MinimumSize = new Size(
+                (int)Math.Round(baseMinimumSize.Width * factor),
+                (int)Math.Round(baseMinimumSize.Height * factor));
+
+            var lv = licenseList;
+            if (zoomInfoMap.ContainsKey(lv))
+            {
+                var widths = zoomInfoMap[lv].ColumnWidths;
+                for (int i = 0; i < widths.Length && i < lv.Columns.Count; i++)
+                    lv.Columns[i].Width = (int)Math.Round(widths[i] * factor);
+            }
+            ResumeAllLayout(this);
+            AutoFitAllColumns();
+            SaveUiSettings();
+        }
+
+        private void SuspendAllLayout(Control root)
+        {
+            root.SuspendLayout();
+            foreach (Control c in root.Controls) SuspendAllLayout(c);
+        }
+
+        private void ResumeAllLayout(Control root)
+        {
+            foreach (Control c in root.Controls) ResumeAllLayout(c);
+            root.ResumeLayout(true);
+        }
 
         // 발급 현황 모든 열을 내용 길이에 맞게 자동 확장
         private void AutoFitAllColumns()
@@ -148,8 +271,21 @@ namespace KJ_FlowForge_CreateKey
             Size = new Size(1660, 1010);
             MinimumSize = new Size(1500, 900);
             StartPosition = FormStartPosition.CenterScreen;
-
-            BuildThemeButtons();
+            TryLoadZoom();
+            if (Math.Abs(uiZoom - DesignScale) > 0.01f)
+            {
+                float rf = uiZoom / DesignScale;
+                Font = new Font("맑은 고딕", 15f * rf);
+                Size = new Size((int)Math.Round(1660 * rf), (int)Math.Round(1010 * rf));
+                MinimumSize = new Size((int)Math.Round(1500 * rf), (int)Math.Round(900 * rf));
+                baseClientSize = ClientSize;
+                baseMinimumSize = MinimumSize;
+            }
+            else
+            {
+            baseClientSize = ClientSize;
+            baseMinimumSize = MinimumSize;
+            }
 
             tabs = new TabControl { Dock = DockStyle.Fill };
             var issueTab = BuildIssueTab();
@@ -162,89 +298,31 @@ namespace KJ_FlowForge_CreateKey
             tabs.TabPages.Add(historyTab);
 
             Controls.Add(tabs);
-            lightModeButton.BringToFront();
-            darkModeButton.BringToFront();
+            tabsBaseFontFamily = tabs.Font.FontFamily.Name;
+            tabsBaseFontSize = tabs.Font.Size;
+            tabsBaseFontStyle = tabs.Font.Style;
+            // Ctrl+휠 줌 필터 등록
+            var wheelFilter = new CtrlWheelFilter(this);
+            Application.AddMessageFilter(wheelFilter);
+            FormClosed += (s, e) => Application.RemoveMessageFilter(wheelFilter);
+            Shown += (s, e) => CaptureZoomBase();
+            // 탭 전환 시 저장 버튼 위치 초기화
+            tabs.SelectedIndexChanged += (s, e) =>
+            {
+                if (tabs.SelectedTab != null && tabs.SelectedTab.Text == "프로젝트 관리")
+                {
+                    if (projectSaveButton != null && tabs.SelectedTab.ClientSize.Width > S(100))
+                    {
+                        projectSaveButton.Location = new Point(
+                            tabs.SelectedTab.ClientSize.Width - projectSaveButton.Width - S(16),
+                            tabs.SelectedTab.ClientSize.Height - projectSaveButton.Height - S(8));
+                    }
+                }
+            };
             FormClosing += (s, e) => SaveUiSettings();
             Resize += (s, e) => AutoFitAllColumns();
             Load += (s, e) => { LoadHistory(); Reload(); TryPullProjects(); ReloadProjects(); UpdateGitStatusLabel(); };
             Shown += (s, e) => { BackupLocalKeys(); ShowExpiryAlert(); };
-        }
-
-        private void BuildThemeButtons()
-        {
-            lightModeButton = new Button
-            {
-                Text = "라이트",
-                Width = S(82),
-                Height = S(32),
-                Top = S(8),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            };
-            darkModeButton = new Button
-            {
-                Text = "다크",
-                Width = S(82),
-                Height = S(32),
-                Top = S(8),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            };
-            lightModeButton.Left = ClientSize.Width - S(178);
-            darkModeButton.Left = ClientSize.Width - S(90);
-            lightModeButton.Click += (s, e) => SetTheme(false);
-            darkModeButton.Click += (s, e) => SetTheme(true);
-            Controls.Add(lightModeButton);
-            Controls.Add(darkModeButton);
-            Resize += (s, e) =>
-            {
-                lightModeButton.Left = ClientSize.Width - S(178);
-                darkModeButton.Left = ClientSize.Width - S(90);
-            };
-        }
-
-        private void SetTheme(bool enabled)
-        {
-            darkMode = enabled;
-            BackColor = enabled ? Color.FromArgb(30, 33, 40) : SystemColors.Control;
-            ForeColor = enabled ? Color.Gainsboro : SystemColors.ControlText;
-            ApplyTheme(Controls);
-            lightModeButton.BackColor = enabled ? Color.FromArgb(55, 59, 68) : Color.White;
-            darkModeButton.BackColor = enabled ? Color.FromArgb(70, 74, 84) : Color.White;
-        }
-
-        private void ApplyTheme(Control.ControlCollection controls)
-        {
-            foreach (Control control in controls)
-            {
-                if (control == lightModeButton || control == darkModeButton) continue;
-                if (control is TabControl)
-                {
-                    control.BackColor = darkMode ? Color.FromArgb(30, 33, 40) : SystemColors.Control;
-                    control.ForeColor = darkMode ? Color.Gainsboro : SystemColors.ControlText;
-                }
-                else if (control is ListView)
-                {
-                    var list = (ListView)control;
-                    list.BackColor = darkMode ? Color.FromArgb(38, 42, 50) : Color.White;
-                    list.ForeColor = darkMode ? Color.Gainsboro : SystemColors.ControlText;
-                }
-                else if (control is TextBox || control is ComboBox)
-                {
-                    control.BackColor = darkMode ? Color.FromArgb(45, 49, 58) : Color.White;
-                    control.ForeColor = darkMode ? Color.Gainsboro : SystemColors.ControlText;
-                }
-                else if (control is Button)
-                {
-                    var button = (Button)control;
-                    button.BackColor = darkMode ? Color.FromArgb(55, 59, 68) : SystemColors.Control;
-                    button.ForeColor = darkMode ? Color.Gainsboro : SystemColors.ControlText;
-                }
-                else
-                {
-                    control.BackColor = darkMode ? Color.FromArgb(30, 33, 40) : SystemColors.Control;
-                    control.ForeColor = darkMode ? Color.Gainsboro : SystemColors.ControlText;
-                }
-                if (control.HasChildren) ApplyTheme(control.Controls);
-            }
         }
         // ==================== 프로젝트 관리 탭 ====================
 
@@ -261,6 +339,17 @@ namespace KJ_FlowForge_CreateKey
             };
 
 
+            // Resize 시 저장 버튼을 탭 페이지 우측 하단에 동적으로 배치
+            page.Resize += (ss, ee) =>
+            {
+                if (page.ClientSize.Width > S(100) && projectSaveButton != null)
+                {
+                    projectSaveButton.Location = new Point(
+                        page.ClientSize.Width - projectSaveButton.Width - S(16),
+                        page.ClientSize.Height - projectSaveButton.Height - S(8));
+                }
+            };
+
             var info = new Label
             {
                 Text = "좌측에서 저장소를 선택하고, 유저(키 ID)를 고른 뒤 해당 유저의 허용 브랜치를 체크하세요. 저장 시 projects.json에 반영·푸시됩니다. 프로젝트 정의(깃 주소 등)는 허브 관리자가 등록한 항목입니다.",
@@ -276,8 +365,8 @@ namespace KJ_FlowForge_CreateKey
                 FullRowSelect = true,
                 GridLines = true,
                 HideSelection = false,
-                Location = new Point(S(12), S(118)),
-                Size = new Size(S(560), S(382)),
+                Location = new Point(S(12), S(80)),
+                Size = new Size(S(560), S(420)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left,
                 Font = new Font("맑은 고딕", 14f),
             };
@@ -285,16 +374,6 @@ namespace KJ_FlowForge_CreateKey
             projectList.Columns.Add("이름", 130);
             projectList.Columns.Add("깃 주소", 280);
             projectList.SelectedIndexChanged += (s, e) => LoadSelectedProject();
-
-            projectRefreshButton = new Button { Text = "새로고침", Location = new Point(S(12), S(78)), Width = S(100), Height = S(32) };
-            projectRefreshButton.Click += (s, e) => { TryPullProjects(); ReloadProjects(); };
-            projectCopyUrlButton = new Button { Text = "깃주소 복사", Location = new Point(S(118), S(78)), Width = S(125), Height = S(32) };
-            projectCopyUrlButton.Click += (s, e) =>
-            {
-                string url = GetSelectedProjectUrl();
-                if (url.Length > 0) SetSensitiveClipboard(url);
-                else MessageBox.Show("복사할 프로젝트를 먼저 선택하세요.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            };
 
             var labelUser = new Label { Text = "유저 선택 (키 ID)", Location = new Point(S(590), S(80)), AutoSize = true };
             projectUserBox = new ComboBox
@@ -336,47 +415,36 @@ namespace KJ_FlowForge_CreateKey
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
             };
 
-            // 저장 버튼은 하단 패널에 고정 배치 (Dock 방식으로 항상 보이도록)
             projectSaveButton = new Button
             {
                 Text = "변경 저장 & 푸시",
-                Width = S(150),
-                Height = S(32),
+                Width = S(250),
+                Height = S(44),
+                Location = new Point(S(590), S(500)),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                BackColor = Color.FromArgb(46, 139, 87),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                FlatAppearance = { BorderColor = Color.FromArgb(46, 139, 87) },
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
             };
             projectSaveButton.Click += async (s, e) => await SaveProjectsAndPush();
 
-            // 하단 패널: 우측에 [결과 캡션 + 저장 버튼] 세로 스택 배치
-            projectPushStatusLabel = new Label
+            // 저장 버튼을 우측 하단에 동적으로 배치
+            page.Resize += (ss, ee) =>
             {
-                Text = "",
-                Size = new Size(S(150), S(26)),
-                Location = new Point(0, S(2)),
-                TextAlign = ContentAlignment.MiddleCenter,
-                ForeColor = Color.DimGray,
+                if (projectSaveButton != null && page.ClientSize.Width > S(100) && page.ClientSize.Height > S(100))
+                {
+                    projectSaveButton.Location = new Point(
+                        page.ClientSize.Width - projectSaveButton.Width - S(16),
+                        page.ClientSize.Height - projectSaveButton.Height - S(8));
+                }
             };
-            var bottomPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = S(86),
-                BackColor = Color.White,
-            };
-            var bottomRightStack = new Panel
-            {
-                Dock = DockStyle.Right,
-                Width = S(150),
-                Height = S(86),
-                BackColor = Color.White,
-            };
-            projectSaveButton.Dock = DockStyle.Bottom;
-            bottomRightStack.Controls.Add(projectSaveButton);
-            bottomRightStack.Controls.Add(projectPushStatusLabel);
-            bottomPanel.Controls.Add(bottomRightStack);
+
 
             page.Controls.AddRange(new Control[] { title, info, projectList,
-                projectRefreshButton, projectCopyUrlButton,
                 labelUser, projectUserBox, projectUserNameLabel,
-                labelBranch, projectRefreshBranchesButton, projectBranchPanel, bottomPanel });
-            bottomPanel.BringToFront();
+                labelBranch, projectRefreshBranchesButton, projectBranchPanel, projectSaveButton });
 
             return page;
         }
@@ -468,13 +536,6 @@ namespace KJ_FlowForge_CreateKey
                 item.SubItems.Add(en.Name);
                 item.SubItems.Add(en.Url);
                 projectList.Items.Add(item);
-            }
-            if (projectList.Columns.Count >= 2)
-            {
-                projectList.AutoResizeColumn(0, ColumnHeaderAutoResizeStyle.ColumnContent);
-                projectList.AutoResizeColumn(1, ColumnHeaderAutoResizeStyle.ColumnContent);
-                projectList.Columns[0].Width = Math.Max(projectList.Columns[0].Width, S(60));
-                projectList.Columns[1].Width = Math.Max(projectList.Columns[1].Width, S(60));
             }
         }
 
@@ -644,7 +705,6 @@ namespace KJ_FlowForge_CreateKey
         {
             try
             {
-                SetProjectPushStatus("처리 중...", Color.DimGray);
                 // 현재 선택된 저장소/유저의 체크 브랜치를 프로젝트 정의에 반영
                 var selectedProject = GetSelectedProject();
                 if (selectedProject != null && projectUserBox != null)
@@ -663,13 +723,11 @@ namespace KJ_FlowForge_CreateKey
                     if (en.Id.Length == 0 || en.Url.Length == 0)
                     {
                         MessageBox.Show("프로젝트 ID와 깃 주소가 비어 있는 항목이 있습니다.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        SetProjectPushStatus("완료 실패", Color.Red);
                         return false;
                     }
                     if (!hashes.Add(en.Id))
                     {
                         MessageBox.Show("중복된 프로젝트 ID가 있습니다: " + en.Id, "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        SetProjectPushStatus("완료 실패", Color.Red);
                         return false;
                     }
                 }
@@ -684,56 +742,28 @@ namespace KJ_FlowForge_CreateKey
                 {
                     AppendHistory("변경", "projects.json", "변경사항 없음(이미 반영됨)", "성공");
                     MessageBox.Show("변경사항이 없어 커밋하지 않았습니다.", "정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    SetProjectPushStatus("완료됨", Color.Green);
                     return true;
                 }
                 var gitLog = new StringBuilder();
                 RunGitCapture(repoDir, "commit -m \"chore: update projects.json\"", gitLog);
-                RunGit(repoDir, "fetch origin main");
-
+                RunGit(repoDir, "pull --rebase origin main");
                 int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
-                if (pushExit != 0)
-                {
-                    RunGitCapture(repoDir, "pull --rebase origin main", gitLog);
-                    pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
-                }
                 if (pushExit != 0)
                 {
                     AppendHistory("변경", "projects.json", "로컬 커밋 완료, 푸시 실패", "푸시 필요");
                     MessageBox.Show("Git push 실패. 커밋은 로컬에 남아 있습니다.\n\n=== Git 출력 ===\n" + gitLog.ToString(),
                         "푸시 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    SetProjectPushStatus("완료 실패", Color.Red);
                     return false;
                 }
                 AppendHistory("변경", "projects.json", "커밋 & 푸시 완료", "성공");
                 UpdateGitStatusLabel();
-                SetProjectPushStatus("완료됨", Color.Green);
                 return true;
             }
             catch (Exception ex)
             {
                 AppendHistory("변경", "projects.json", "오류: " + ex.Message, "실패");
                 MessageBox.Show("오류: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                SetProjectPushStatus("완료 실패", Color.Red);
                 return false;
-            }
-        }
-
-        private void SetProjectPushStatus(string msg, Color color)
-        {
-            if (projectPushStatusLabel == null) return;
-            if (InvokeRequired)
-            {
-                Invoke((Action)(() =>
-                {
-                    projectPushStatusLabel.Text = msg;
-                    projectPushStatusLabel.ForeColor = color;
-                }));
-            }
-            else
-            {
-                projectPushStatusLabel.Text = msg;
-                projectPushStatusLabel.ForeColor = color;
             }
         }
 
@@ -794,7 +824,7 @@ namespace KJ_FlowForge_CreateKey
             return page;
         }
 
-        // ==================== 설정 저장 ====================
+        // ==================== 설정 저장/복원 (배율 기억) ====================
 
         private void SaveUiSettings()
         {
@@ -802,9 +832,31 @@ namespace KJ_FlowForge_CreateKey
             {
                 var sb = new StringBuilder();
                 sb.AppendLine("{");
-                sb.AppendLine("{ \"ui\": \"1.0\" }");
+                sb.AppendLine("  \"zoom\": " + uiZoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 sb.AppendLine("}");
                 File.WriteAllText(SettingsPath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private void TryLoadZoom()
+        {
+            try
+            {
+                if (!File.Exists(SettingsPath)) return;
+                string raw = File.ReadAllText(SettingsPath);
+                int i = raw.IndexOf("\"zoom\"");
+                if (i < 0) return;
+                int colon = raw.IndexOf(':', i);
+                int end = colon;
+                while (end < raw.Length && (char.IsDigit(raw[end]) || raw[end] == '.' || raw[end] == '-')) end++;
+                float z;
+                if (float.TryParse(raw.Substring(colon + 1, end - colon - 1).Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out z))
+                {
+                    uiZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, z));
+                }
             }
             catch { }
         }
@@ -1798,8 +1850,9 @@ namespace KJ_FlowForge_CreateKey
                 return;
             }
 
-            RunGit(repoDir, "fetch origin main");
             int exit = RunGitCapture(repoDir, "push origin main", output);
+            RunGit(repoDir, "pull --rebase origin main");
+            exit = RunGitCapture(repoDir, "push origin main", output);
             pushRetryButton.Enabled = true;
             pushRetryButton.Text = "푸시 재시도";
             if (exit == 0 && aheadCount > 0)
@@ -2516,17 +2569,9 @@ namespace KJ_FlowForge_CreateKey
                     return true;
                 }
                 var gitLog = new StringBuilder();
-                RunGit(repoDir, "fetch origin main");
                 RunGitCapture(repoDir, "commit -m \"chore: " + commitMessage.Replace("\"", "") + "\"", gitLog);
-
-                // push 시도. 원격이 앞서 있어 non-fast-forward로 거부되면 pull --rebase 후 재시도.
-                // (reset --soft로 방금 만든 커밋을 벗겨내지 않도록 주의: 커밋은 반드시 유지되어야 한다.)
+                RunGit(repoDir, "pull --rebase origin main");
                 int pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
-                if (pushExit != 0)
-                {
-                    RunGit(repoDir, "pull --rebase origin main");
-                    pushExit = RunGitCapture(repoDir, "push origin main", gitLog);
-                }
 
                 if (pushExit != 0)
                 {
@@ -2601,13 +2646,8 @@ namespace KJ_FlowForge_CreateKey
             {
                 Environment.Exit(0);
             }
-            bool createdNew;
-            using (var mutex = new System.Threading.Mutex(true, "KJ_FlowForge_CreateKey_SingleInstance", out createdNew))
-            {
-                if (!createdNew) return;
-                Application.EnableVisualStyles();
-                Application.Run(new MainForm());
-            }
+            Application.EnableVisualStyles();
+            Application.Run(new MainForm());
         }
     }
 }
